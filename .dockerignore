@@ -1,0 +1,26 @@
+# Without this, `gcloud run deploy --source .` uploads the whole .venv to Cloud Build:
+# hundreds of MB, a slow build, and a container that may shadow its own site-packages.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.git/
+.gitignore
+
+# Secrets must never reach the image; config comes from --set-env-vars.
+.env
+*.env
+!.env.example
+service-account*.json
+
+# Local artefacts
+_*.log
+_*.err
+_ui*.png
+docs/
+scripts/
+tests/
+deploy/
+*.md
+!README.md

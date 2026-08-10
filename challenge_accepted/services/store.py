@@ -17,12 +17,16 @@ Collections mirror the architecture diagram:
 
 from __future__ import annotations
 
+import logging
+import os
 import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from .. import config
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -81,9 +85,16 @@ def _similar(a: frozenset[str], b: frozenset[str], threshold: float = 0.6) -> bo
 class Store:
     """Minimal repository. Swap the backend without touching agent code."""
 
-    def __init__(self) -> None:
+    def __init__(self, client: Any = None) -> None:
+        """`client` is injectable so the Firestore branch can be tested.
+
+        Every Firestore path here went unexecuted for the project's first nine commits
+        -- marked `# pragma: no cover` and shipped on trust. That is precisely the code
+        most likely to fail on demo day, when GOOGLE_CLOUD_PROJECT is finally set.
+        tests/test_store_firestore.py now drives these branches through a fake client.
+        """
         self._lock = threading.Lock()
-        self._client: Any = None
+        self._client: Any = client
         self._mem: dict[str, dict[str, Any]] = {
             "challenges": {},
             "nodes": {},
@@ -92,14 +103,42 @@ class Store:
             "feedback": {},
             "groups": {},
         }
-        if config.use_firestore():
+        if client is None and config.use_firestore():
             try:  # pragma: no cover - requires GCP creds
                 from google.cloud import firestore  # type: ignore
 
                 self._client = firestore.Client(project=config.GOOGLE_CLOUD_PROJECT)
-            except Exception:
-                # Fall back silently to memory; the agent tree must still boot.
+            except Exception as exc:  # pragma: no cover - requires GCP creds
+                # Falling back SILENTLY was the dangerous version: with
+                # GOOGLE_CLOUD_PROJECT set the app looked healthy, served happily, and
+                # quietly lost every write on restart -- with no multiplayer, because
+                # two Cloud Run instances would each hold their own dict. Now it is
+                # loud, and CA_REQUIRE_FIRESTORE=1 turns it into a hard failure so a
+                # misconfigured deploy cannot reach the judges.
+                logger.error(
+                    "Firestore requested (GOOGLE_CLOUD_PROJECT=%s) but unavailable: "
+                    "%s: %s -- FALLING BACK TO IN-MEMORY STORE. Data will not persist "
+                    "and teammates will not see each other.",
+                    config.GOOGLE_CLOUD_PROJECT, type(exc).__name__, exc,
+                )
+                if os.getenv("CA_REQUIRE_FIRESTORE") == "1":
+                    raise RuntimeError(
+                        "CA_REQUIRE_FIRESTORE=1 and Firestore is unavailable"
+                    ) from exc
                 self._client = None
+
+    @staticmethod
+    def _field_filter(field: str, value: Any) -> Any:
+        """Build a Firestore filter.
+
+        `where(field, "==", value)` positionally is DEPRECATED in google-cloud-firestore
+        (2.28 warns; Google has said it will be removed). Using the positional form was
+        a silent time bomb: it works today, warns tomorrow, breaks on a routine
+        dependency bump -- most likely the one you do the night before submitting.
+        """
+        from google.cloud.firestore_v1.base_query import FieldFilter
+
+        return FieldFilter(field, "==", value)
 
     @property
     def backend(self) -> str:
@@ -216,7 +255,7 @@ class Store:
     # -- reads ---------------------------------------------------------------
 
     def get(self, collection: str, doc_id: str) -> Optional[dict[str, Any]]:
-        if self._client:  # pragma: no cover
+        if self._client:
             snap = self._client.collection(collection).document(doc_id).get()
             return snap.to_dict() if snap.exists else None
         with self._lock:
@@ -224,9 +263,12 @@ class Store:
 
     def list_challenges(self, group_id: Optional[str] = None) -> list[dict[str, Any]]:
         """Newest first. Optionally scoped to one group."""
-        if self._client:  # pragma: no cover
+        if self._client:
             col = self._client.collection("challenges")
-            query = col.where("group_id", "==", group_id) if group_id else col
+            query = (
+                col.where(filter=self._field_filter("group_id", group_id))
+                if group_id else col
+            )
             rows = [d.to_dict() for d in query.stream()]
         else:
             with self._lock:
@@ -254,23 +296,25 @@ class Store:
     # -- backend plumbing ----------------------------------------------------
 
     def _put(self, collection: str, doc_id: str, doc: dict[str, Any]) -> None:
-        if self._client:  # pragma: no cover
+        if self._client:
             self._client.collection(collection).document(doc_id).set(doc)
             return
         with self._lock:
             self._mem[collection][doc_id] = doc
 
     def _patch(self, collection: str, doc_id: str, patch: dict[str, Any]) -> None:
-        if self._client:  # pragma: no cover
+        if self._client:
             self._client.collection(collection).document(doc_id).set(patch, merge=True)
             return
         with self._lock:
             self._mem[collection].setdefault(doc_id, {}).update(patch)
 
     def _query(self, collection: str, field: str, value: Any) -> list[dict[str, Any]]:
-        if self._client:  # pragma: no cover
-            return [d.to_dict() for d in
-                    self._client.collection(collection).where(field, "==", value).stream()]
+        if self._client:
+            query = self._client.collection(collection).where(
+                filter=self._field_filter(field, value)
+            )
+            return [d.to_dict() for d in query.stream()]
         with self._lock:
             return [d for d in self._mem[collection].values() if d.get(field) == value]
 
