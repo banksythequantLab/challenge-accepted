@@ -222,6 +222,20 @@ class Store:
         with self._lock:
             return self._mem[collection].get(doc_id)
 
+    def list_challenges(self, group_id: Optional[str] = None) -> list[dict[str, Any]]:
+        """Newest first. Optionally scoped to one group."""
+        if self._client:  # pragma: no cover
+            col = self._client.collection("challenges")
+            query = col.where("group_id", "==", group_id) if group_id else col
+            rows = [d.to_dict() for d in query.stream()]
+        else:
+            with self._lock:
+                rows = [
+                    c for c in self._mem["challenges"].values()
+                    if group_id is None or c.get("group_id") == group_id
+                ]
+        return sorted(rows, key=lambda c: c.get("created_at", ""), reverse=True)
+
     def list_nodes(self, challenge_id: str) -> list[dict[str, Any]]:
         return self._query("nodes", "challenge_id", challenge_id)
 

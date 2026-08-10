@@ -12,9 +12,11 @@ import os
 from pathlib import Path
 
 import uvicorn
+from fastapi.responses import FileResponse
 from google.adk.cli.fast_api import get_fast_api_app
 
 from challenge_accepted import config
+from challenge_accepted.api import router as api_router
 
 AGENTS_DIR = str(Path(__file__).parent)
 
@@ -41,6 +43,21 @@ app = get_fast_api_app(
     web=True,                      # ADK dev UI at / -- useful for the demo video
     trace_to_cloud=config.use_vertex(),
 )
+
+
+#: Read API for the front end. The ADK app owns /run and /run_sse; this owns /api/*.
+app.include_router(api_router)
+
+
+@app.get("/app", include_in_schema=False)
+def dashboard() -> FileResponse:
+    """The goal graph / journal / feedback UI.
+
+    Served by the same Cloud Run service as the agent API on purpose: one deploy, one
+    origin, no CORS, no second hosting platform to fail on demo day. It is a single
+    static file with no build step, so `git clone && python main.py` renders it.
+    """
+    return FileResponse(Path(__file__).parent / "challenge_accepted" / "static" / "app.html")
 
 
 @app.get("/healthz")
