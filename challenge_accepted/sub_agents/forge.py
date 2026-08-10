@@ -64,6 +64,9 @@ quartermaster = LlmAgent(
 # the worker would receive the literal placeholder text instead of its spec.
 SLOT_PREFIX = "forge_slot_"
 QUEUE_KEY = "forge_queue"
+#: Fingerprint of the spec set the queue was last seeded from, so a second FORGE entry
+#: with fresh specs reseeds instead of inheriting the drained queue.
+SEED_KEY = "forge_seeded_for"
 
 
 def _code_executor() -> BuiltInCodeExecutor:
@@ -114,6 +117,12 @@ def _worker(index: int) -> LlmAgent:
         mode="single_turn",
         code_executor=_code_executor(),
         tools=[save_tool],
+        # A worker keeps the same branch across loop iterations, so by default it sees
+        # its OWN previous turn. Observed consequence: on iterations where its slot was
+        # empty it re-summarised the tool it had built earlier -- confident prose, no
+        # save_tool call, pure wasted tokens. With contents suppressed it sees only its
+        # instruction plus the injected slot, so an empty slot reliably means idle.
+        include_contents="none",
         generate_content_config=types.GenerateContentConfig(
             tool_config=types.ToolConfig(include_server_side_tool_invocations=True),
         ),
@@ -132,23 +141,32 @@ class Dispatcher(BaseAgent):
     async def _run_async_impl(
         self, ctx: InvocationContext
     ) -> AsyncGenerator[Event, None]:
+        import json
+
         state = ctx.session.state
 
-        queue = state.get(QUEUE_KEY)
-        if queue is None:
-            raw = state.get("tool_specs") or {}
-            if isinstance(raw, str):
-                import json
+        raw = state.get("tool_specs") or {}
+        if isinstance(raw, str):
+            try:
+                raw = json.loads(raw)
+            except json.JSONDecodeError:
+                raw = {}
+        specs = [s for s in (raw.get("specs") or []) if s.get("needed")]
 
-                try:
-                    raw = json.loads(raw)
-                except json.JSONDecodeError:
-                    raw = {}
-            queue = [s for s in (raw.get("specs") or []) if s.get("needed")]
+        # Reseed whenever the Quartermaster has produced a NEW spec set. Seeding only
+        # on `queue is None` was wrong: FORGE can be entered more than once in a
+        # session (the user says "build the tools" again, or the graph is redrawn), and
+        # on the second entry the leftover empty queue from the first made the
+        # Dispatcher escalate immediately -- silently discarding every new spec.
+        fingerprint = json.dumps([s.get("node_id") for s in specs], sort_keys=True)
+        if state.get(SEED_KEY) != fingerprint:
+            queue = specs
+        else:
+            queue = state.get(QUEUE_KEY) or []
 
         batch, queue = queue[: self.workers], queue[self.workers :]
 
-        delta: dict[str, object] = {QUEUE_KEY: queue}
+        delta: dict[str, object] = {QUEUE_KEY: queue, SEED_KEY: fingerprint}
         for i in range(self.workers):
             delta[f"{SLOT_PREFIX}{i}"] = batch[i] if i < len(batch) else None
 

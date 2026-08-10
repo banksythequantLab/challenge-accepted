@@ -19,15 +19,20 @@ Built for the [All Things Agentic hackathon](https://allthingsagentichackathon.d
 
 | | |
 |---|---|
-| Verified live | 8-turn interview -> charter saved -> 10-node DAG -> 4 tools built, smoke-tested and persisted |
+| Verified live | 8-turn interview -> charter saved -> 12-node DAG -> 6 tools built, smoke-tested and persisted |
 | Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
-| Verified | 11 tests pass against a real ADK `Runner`; FastAPI boots, `/healthz` 200 |
-| Measured | One full challenge = **194k prompt / 20k output tokens, ~$0.44** at 3.6-flash rates |
-| Suspect | Exactly 4 tools for 10 nodes = `FORGE_WORKERS`. The LoopAgent may not be draining the queue past batch one. **Verify before trusting the fan-out.** |
+| Verified | 14 tests pass against a real ADK `Runner`; FastAPI boots, `/healthz` 200 |
+| Measured | One full challenge (12 nodes, 6 tools) = **243k prompt / 66k billed output, ~$0.86**. Break-even at $29/seat ≈ **34 challenges/user/month** |
+| Fixed | The "exactly 4 tools" ceiling. Two causes, both live-only. See Known issues. |
 | Not run | CLIMB phase (Coach/Referee) end to end; group memory across two users |
 | Not built | Next.js front end, React Flow graph, Firebase Auth, Cloud Run deploy |
 
-Reproduce with `python scripts\live_walk.py` (costs ~$0.44).
+Reproduce with `python scripts\live_walk.py` (costs ~$0.86, prints full token accounting).
+
+**Token accounting gotcha:** thinking tokens bill as *output* on Gemini 3.x and are
+reported in `thoughts_token_count`, separate from `candidates_token_count`. Summing
+candidates alone under-reported cost by up to 3x -- measured 725 thinking vs 251 visible
+on one short call. `live_walk.py` now sums both; anything estimating cost must too.
 
 Run `pytest` to see exactly what is and isn't covered.
 
@@ -107,6 +112,31 @@ checklist rather than blocking the graph.
 ---
 
 ## Known issues
+
+### Fixed: the "exactly 4 tools" ceiling
+
+Two consecutive live runs each produced exactly 4 tools, and `FORGE_WORKERS` is 4. Two
+independent causes, neither reachable from a test that does not call a model:
+
+**1. Stale queue across a second FORGE entry.** The Dispatcher seeded its queue only
+when `forge_queue is None`. Warden delegates to `forge` more than once per session, and
+on the second entry the drained `[]` from the first was treated as authoritative -- so
+the Dispatcher escalated immediately and *silently discarded every new ToolSpec*. The
+run simply builds nothing and says nothing. Now the queue reseeds whenever the spec set
+changes, keyed on a fingerprint of the node ids. Covered by `tests/test_forge_reentry.py`.
+
+**2. Workers re-reported instead of idling.** A worker keeps the same branch across loop
+iterations, so it saw its own previous turn. On iterations where its slot was empty it
+wrote confident prose re-summarising the tool it had already built -- no `save_tool`
+call, pure wasted tokens, and misleading logs. Fixed with `include_contents="none"` so a
+worker sees only its instruction plus the injected slot.
+
+After both fixes: 12 nodes -> 6 tools, and `save_tool` calls now equal tools persisted.
+
+Worth knowing for the writeup: the loop itself was never broken. `tests/test_forge_loop.py`
+proved it drains 10 specs in batches of 4/4/2 before either fix landed. The temptation
+was to "fix" the loop; the evidence said not to.
+
 
 **`SequentialAgent` / `ParallelAgent` / `LoopAgent` are deprecated in ADK 2.6.3**, in
 favour of the new `google.adk.workflow.Workflow`. We are on the deprecated path on

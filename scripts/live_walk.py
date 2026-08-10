@@ -50,7 +50,13 @@ TURNS = [
     "Looks good. Build whatever tools those steps need.",
 ]
 
-TOKENS = {"prompt": 0, "output": 0}
+# Thinking tokens bill as OUTPUT on Gemini 3.x and are reported separately from
+# candidates_token_count. Summing candidates alone under-reports cost by ~3x -- measured
+# 725 thinking vs 251 visible on a single short call. Track both.
+TOKENS = {"prompt": 0, "candidates": 0, "thoughts": 0, "cached": 0}
+
+PRICE_IN_PER_M = 1.50   # gemini-3.6-flash
+PRICE_OUT_PER_M = 7.50
 
 
 def _describe(event) -> list[str]:
@@ -99,7 +105,9 @@ async def main() -> None:
                 usage = getattr(event, "usage_metadata", None)
                 if usage:
                     TOKENS["prompt"] += getattr(usage, "prompt_token_count", 0) or 0
-                    TOKENS["output"] += getattr(usage, "candidates_token_count", 0) or 0
+                    TOKENS["candidates"] += getattr(usage, "candidates_token_count", 0) or 0
+                    TOKENS["thoughts"] += getattr(usage, "thoughts_token_count", 0) or 0
+                    TOKENS["cached"] += getattr(usage, "cached_content_token_count", 0) or 0
                 lines = _describe(event)
                 if not lines:
                     continue
@@ -131,9 +139,19 @@ async def main() -> None:
             flag = "ok" if t.get("smoke_test_passed") else "DEGRADED"
             print(f"      - {t.get('name')} [{t.get('type')}] {flag} node={t.get('node_id')}")
         print(f"  journal      : {len(store.list_journal(str(cid)))} entries")
-    print(f"\n  tokens: prompt={TOKENS['prompt']:,} output={TOKENS['output']:,}")
-    cost = TOKENS["prompt"] / 1e6 * 1.50 + TOKENS["output"] / 1e6 * 7.50
-    print(f"  approx cost at 3.6-flash rates: ${cost:.4f}")
+    billed_out = TOKENS["candidates"] + TOKENS["thoughts"]
+    cost = (TOKENS["prompt"] / 1e6 * PRICE_IN_PER_M
+            + billed_out / 1e6 * PRICE_OUT_PER_M)
+    ratio = (TOKENS["thoughts"] / TOKENS["candidates"]) if TOKENS["candidates"] else 0
+
+    print(f"\n  prompt tokens     : {TOKENS['prompt']:,}")
+    print(f"  visible output    : {TOKENS['candidates']:,}")
+    print(f"  thinking tokens   : {TOKENS['thoughts']:,}  ({ratio:.1f}x visible)")
+    print(f"  cached            : {TOKENS['cached']:,}")
+    print(f"  BILLED output     : {billed_out:,}  (candidates + thoughts)")
+    print(f"\n  cost at 3.6-flash rates: ${cost:.4f} per challenge")
+    if cost:
+        print(f"  break-even at $29/seat/mo: {29 / cost:.0f} challenges/user/month")
 
 
 if __name__ == "__main__":
