@@ -32,6 +32,7 @@ from google.adk.agents import BaseAgent, LlmAgent, LoopAgent, ParallelAgent, Seq
 from google.adk.agents.invocation_context import InvocationContext
 from google.adk.code_executors import BuiltInCodeExecutor
 from google.adk.events import Event, EventActions
+from google.genai import types
 from pydantic import BaseModel, Field
 
 from .. import config, prompts
@@ -89,9 +90,17 @@ def _code_executor() -> BuiltInCodeExecutor:
 def _worker(index: int) -> LlmAgent:
     """One Toolwright.
 
-    Note there are no `tools=[...]` here beyond save_tool: a code executor presents to
-    the model as a built-in tool, and built-in tools do not compose with arbitrary
-    function tools on some model/runtime combinations. Keep this agent's surface small.
+    A code executor presents to Gemini as a *server-side* (built-in) tool, and by
+    default a request may not mix one with client-side function calling. Without the
+    flag below the API rejects the whole request:
+
+        400 INVALID_ARGUMENT: Please enable
+        tool_config.include_server_side_tool_invocations to use Built-in tools with
+        Function calling.
+
+    That flag is what lets a single worker both execute code AND call `save_tool`.
+    Found by running it; there is no way to hit this from tests that never call a model.
+    Keep this agent's tool surface minimal regardless -- `save_tool` only.
     """
     return LlmAgent(
         name=f"toolwright_{index}",
@@ -105,6 +114,9 @@ def _worker(index: int) -> LlmAgent:
         mode="single_turn",
         code_executor=_code_executor(),
         tools=[save_tool],
+        generate_content_config=types.GenerateContentConfig(
+            tool_config=types.ToolConfig(include_server_side_tool_invocations=True),
+        ),
     )
 
 

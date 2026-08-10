@@ -12,3 +12,5 @@ node_modules/
 .next/
 *.log
 service-account*.json
+_walk.log
+_walk.err

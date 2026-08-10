@@ -15,14 +15,19 @@ Built for the [All Things Agentic hackathon](https://allthingsagentichackathon.d
 
 ## Status
 
-**v0.1 -- agent topology and shared data source. No live model calls yet.**
+**v0.2 -- full ACCEPT -> MAP -> FORGE pipeline verified against live Gemini.**
 
 | | |
 |---|---|
-| Verified | Agent tree builds; 10 tests pass against a real ADK `Runner`; FastAPI boots, `/healthz` 200 |
-| Verified | `Dispatcher` fan-out, `Store` read/write, evidence append, group-fact dedup |
-| NOT run | Any actual Gemini call -- needs an API key. Prompts are **untested** |
+| Verified live | 8-turn interview -> charter saved -> 10-node DAG -> 4 tools built, smoke-tested and persisted |
+| Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
+| Verified | 11 tests pass against a real ADK `Runner`; FastAPI boots, `/healthz` 200 |
+| Measured | One full challenge = **194k prompt / 20k output tokens, ~$0.44** at 3.6-flash rates |
+| Suspect | Exactly 4 tools for 10 nodes = `FORGE_WORKERS`. The LoopAgent may not be draining the queue past batch one. **Verify before trusting the fan-out.** |
+| Not run | CLIMB phase (Coach/Referee) end to end; group memory across two users |
 | Not built | Next.js front end, React Flow graph, Firebase Auth, Cloud Run deploy |
+
+Reproduce with `python scripts\live_walk.py` (costs ~$0.44).
 
 Run `pytest` to see exactly what is and isn't covered.
 
