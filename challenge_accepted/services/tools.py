@@ -213,11 +213,20 @@ def remember_group_fact(fact: str, tool_context: ToolContext) -> dict[str, Any]:
     Returns:
         A status dict.
     """
-    store.add_group_fact(_group_id(tool_context), fact)
+    stored = store.add_group_fact(_group_id(tool_context), fact)
     cid = _challenge_id(tool_context)
-    if cid:
-        store.add_journal(cid, {"actor": "Archivist", "kind": "insight", "text": fact})
-    return {"status": "ok"}
+    if cid and stored:
+        # Attribute to the PERSON, not to the agent that happened to write it. Logging
+        # "Archivist" here meant a teammate's Coach had no way to say "Derek found..."
+        # -- it fell back to "the team found...", which reads like a database, not a
+        # shared workspace. The journal actor is the attribution source.
+        store.add_journal(cid, {
+            "actor": str(tool_context.state.get("user_id", "someone on the team")),
+            "kind": "insight",
+            "text": fact,
+        })
+    return {"status": "ok", "stored": stored,
+            "note": "" if stored else "Already known to the group; not duplicated."}
 
 
 def read_challenge_state(tool_context: ToolContext) -> dict[str, Any]:
@@ -227,8 +236,11 @@ def read_challenge_state(tool_context: ToolContext) -> dict[str, Any]:
     "no_challenge" and you should simply begin the interview from scratch -- group
     facts are still returned, because the user may have history from other challenges.
 
+    `recent_journal` is included so you can attribute a group fact to the teammate who
+    actually hit it ("Derek found...") rather than stating it anonymously.
+
     Returns:
-        A dict with status, charter, nodes, tools and group_facts.
+        A dict with status, charter, nodes, tools, group_facts and recent_journal.
     """
     group_facts = (store.get("groups", _group_id(tool_context)) or {}).get("shared_facts", [])
     cid = _challenge_id(tool_context)
@@ -242,14 +254,21 @@ def read_challenge_state(tool_context: ToolContext) -> dict[str, Any]:
             "group_facts": group_facts,
         }
     challenge = store.get("challenges", cid) or {}
+    nodes = store.list_nodes(cid)
     return {
         "status": "ok",
         "challenge_id": cid,
         "charter": challenge.get("charter", {}),
-        "nodes": store.list_nodes(cid),
+        # Superseded nodes are excluded: they belong to a plan that no longer exists,
+        # and handing one to a teammate is the fastest way to look inattentive.
+        "nodes": [n for n in nodes if n.get("status") != "superseded"],
         "tools": [{"node_id": t.get("node_id"), "name": t.get("name"), "type": t.get("type")}
                   for t in store.list_tools(cid)],
         "group_facts": group_facts,
+        "recent_journal": [
+            {"actor": j.get("actor"), "kind": j.get("kind"), "text": j.get("text")}
+            for j in store.list_journal(cid)[-12:]
+        ],
     }
 
 

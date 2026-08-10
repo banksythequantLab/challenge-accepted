@@ -42,9 +42,28 @@ which who whom whose there their they them he she his her i you we us our your
 """.split())
 
 
+#: Suffixes stripped before comparing. Crude on purpose -- the job is to make
+#: "deployment", "deployed" and "deploy" the same token, not to be linguistically
+#: correct. Without it two people describing one blocker score 0.57 and both get stored.
+_SUFFIXES = ("ments", "ment", "ing", "ies", "ed", "es", "s")
+
+
+def _stem(word: str) -> str:
+    for _ in range(2):  # "deployments" -> "deployment" -> "deploy"
+        for suffix in _SUFFIXES:
+            if word.endswith(suffix) and len(word) - len(suffix) >= 4:
+                word = word[: -len(suffix)]
+                break
+        else:
+            break
+    return word
+
+
 def _content_words(text: str) -> frozenset[str]:
     cleaned = "".join(c.lower() if (c.isalnum() or c.isspace()) else " " for c in text)
-    return frozenset(w for w in cleaned.split() if w not in _STOPWORDS and len(w) > 2)
+    return frozenset(
+        _stem(w) for w in cleaned.split() if w not in _STOPWORDS and len(w) > 2
+    )
 
 
 def _similar(a: frozenset[str], b: frozenset[str], threshold: float = 0.6) -> bool:

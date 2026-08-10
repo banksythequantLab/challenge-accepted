@@ -21,11 +21,12 @@ Built for the [All Things Agentic hackathon](https://allthingsagentichackathon.d
 |---|---|
 | Verified live | 8-turn interview -> charter saved -> 12-node DAG -> 6 tools built, smoke-tested and persisted |
 | Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
-| Verified | 24 tests pass against a real ADK `Runner`; FastAPI boots, `/healthz` 200 |
+| Verified | 29 tests pass against a real ADK `Runner`; FastAPI boots, `/healthz` 200 |
 | Measured | One full challenge (12 nodes, 6 tools) = **243k prompt / 66k billed output, ~$0.86**. Break-even at $29/seat ≈ **34 challenges/user/month** |
 | Fixed | The "exactly 4 tools" ceiling. Two causes, both live-only. See Known issues. |
 | Verified live | CLIMB end to end: node closed on evidence, feedback captured with reason, blocker -> group fact -> interview re-opened -> graph redrawn around the constraint |
-| Not run | Group memory across **two** users (single-user group memory works) |
+| Verified live | **Two users, one challenge.** Dana joins a session Derek started; her Coach opens with *"Derek found Cloud Run requires billing... so we're using Render and Vercel instead"* and hands her a ready node. This is the demo beat |
+| Not verified | That a joining teammate is never offered an already-`done` node. The check exists but was vacuous -- Derek hit a blocker rather than completing anything in that script |
 | Not built | Next.js front end, React Flow graph, Firebase Auth, Cloud Run deploy |
 
 Reproduce with `python scripts\live_walk.py` (costs ~$0.86, prints full token accounting).
@@ -113,6 +114,26 @@ checklist rather than blocking the graph.
 ---
 
 ## Known issues
+
+### Fixed: a joining teammate got interviewed instead of onboarded
+
+Dana opened a challenge Derek had already planned. Warden delegated her to the
+**Interviewer**, which asked "what are Dana's primary technical skills?" -- re-running
+ACCEPT on someone whose entire reason for being there is to *inherit* an existing plan.
+Warden's rule "never skip ACCEPT" was written for a new challenge and silently applied
+to a new person. Added an explicit rule: if `read_challenge_state` returns a charter
+AND nodes, go straight to `coach`, whoever is talking.
+
+**Then attribution failed for a data reason, not a prompt reason.** With routing fixed,
+the Coach said *"the team found Cloud Run needs billing..."*. Tightening the prompt
+could not have fixed it: `remember_group_fact` journalled the actor as `"Archivist"`,
+so Derek's name was never recorded anywhere. The journal now records the acting **user**
+as the actor, and `read_challenge_state` returns `recent_journal` so the Coach can match
+a fact to the person who hit it. Result: *"Derek found Cloud Run requires billing
+enabled and nobody on the team has admin access, so we're using Render and Vercel."*
+
+Worth remembering: the first instinct was to reword the prompt. The prompt was fine.
+The data it needed did not exist.
 
 ### Fixed: CLIMB deadlocked, then dropped feedback, then duplicated everything
 
