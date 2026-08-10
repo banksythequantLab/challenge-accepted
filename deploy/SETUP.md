@@ -44,7 +44,7 @@ project for Cloud Run and Firestore keeps billing and quota in one place.
 ## Step 3 — deploy (scripted)
 
 ```powershell
-cd B:\microgoals
+cd B:\challenge-accepted
 .\deploy\deploy.ps1 -ProjectId <PROJECT_ID> -KeepWarm
 ```
 
@@ -69,7 +69,7 @@ carry an explicit `FALLING BACK TO IN-MEMORY STORE` error.
 Usual cause: the runtime service account lacks `roles/datastore.user`.
 
 ```powershell
-$svc = gcloud run services describe microgoals --region us-central1 --format "value(spec.template.spec.serviceAccountName)"
+$svc = gcloud run services describe challenge-accepted --region us-central1 --format "value(spec.template.spec.serviceAccountName)"
 gcloud projects add-iam-policy-binding <PROJECT_ID> --member "serviceAccount:$svc" --role roles/datastore.user
 ```
 

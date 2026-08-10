@@ -24,7 +24,7 @@ NODES = [
      ["verify-agent-backend", "frontend-shell"], "todo", 120),
     ("goal-graph-view", "Render the goal graph", ["frontend-shell"], "todo", 120),
     ("alt-hosting", "Pick hosting that isn't Cloud Run", [], "blocked", 60),
-    ("deploy-app", "Deploy behind microgoals.app",
+    ("deploy-app", "Deploy behind challengeaccepted.app",
      ["stream-agent-events", "goal-graph-view", "alt-hosting"], "todo", 90),
     ("e2e-walkthrough", "Walk the whole flow", ["deploy-app"], "todo", 60),
     ("record-demo", "Record the demo", ["e2e-walkthrough", "demo-video-script"], "todo", 90),
@@ -56,7 +56,7 @@ JOURNAL = [
 def main() -> None:
     cid = store.create_challenge(
         {
-            "title": "Launch MicroGoals at the hackathon",
+            "title": "Launch Challenge Accepted at the hackathon",
             "outcome": "A deployed URL where a judge types a goal and watches agents "
                        "build them a working tool, plus a 4-minute Devpost video.",
             "definition_of_done": "Submitted on Devpost before Aug 31, 5pm PDT.",

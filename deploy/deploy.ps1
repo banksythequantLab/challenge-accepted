@@ -1,4 +1,4 @@
-# Deploy MicroGoals to Cloud Run.
+# Deploy Challenge Accepted to Cloud Run.
 #
 #   .\deploy\deploy.ps1 -ProjectId your-project-id
 #
@@ -9,7 +9,7 @@
 param(
     [Parameter(Mandatory = $true)][string]$ProjectId,
     [string]$Region = "us-central1",
-    [string]$Service = "microgoals",
+    [string]$Service = "challenge-accepted",
     [string]$ModelReasoning = "gemini-3.6-flash",
     [string]$ModelCheap = "gemini-3.5-flash-lite",
     [switch]$KeepWarm   # min-instances=1: use from the day you start rehearsing
