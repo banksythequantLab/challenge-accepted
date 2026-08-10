@@ -21,7 +21,10 @@ scout = LlmAgent(
     model=config.MODEL_REASONING,
     description="Answers a single factual question using grounded Google Search.",
     instruction=prompts.SCOUT,
-    mode="single_turn",
+    # "chat", not "single_turn" -- an AgentTool runs its agent as a root agent, and ADK
+    # rejects a non-chat root. This was latent: Scout was never actually invoked in any
+    # live run, so the same bug that broke the Referee was sitting here unnoticed.
+    mode="chat",
     tools=[google_search],
 )
 

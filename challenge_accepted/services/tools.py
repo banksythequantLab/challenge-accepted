@@ -106,10 +106,19 @@ def save_goal_graph(nodes: list[dict], rationale: str,
                 "message": "No charter saved yet. The ACCEPT phase must finish first."}
     for node in nodes:
         store.put_node(cid, node)
-    tool_context.state["node_ids"] = [n.get("id") for n in nodes]
+
+    # Redrawing must REPLACE the plan, not append to it. A live re-plan after a blocker
+    # produced 24 nodes -- the old graph and the new one side by side. Nodes already
+    # done keep their status and evidence; the rest are marked superseded.
+    keep = [n.get("id") for n in nodes]
+    retired = store.supersede_nodes(cid, keep)
+
+    tool_context.state["node_ids"] = keep
     store.add_journal(cid, {"actor": "Cartographer", "kind": "decision",
-                            "text": f"Graph drawn: {len(nodes)} nodes. {rationale}"})
-    return {"status": "ok", "node_count": len(nodes)}
+                            "text": f"Graph drawn: {len(nodes)} nodes"
+                                    + (f", {retired} superseded" if retired else "")
+                                    + f". {rationale}"})
+    return {"status": "ok", "node_count": len(nodes), "superseded": retired}
 
 
 def save_tool(node_id: str, tool_type: str, name: str, source: str, usage: str,

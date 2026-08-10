@@ -21,10 +21,11 @@ Built for the [All Things Agentic hackathon](https://allthingsagentichackathon.d
 |---|---|
 | Verified live | 8-turn interview -> charter saved -> 12-node DAG -> 6 tools built, smoke-tested and persisted |
 | Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
-| Verified | 14 tests pass against a real ADK `Runner`; FastAPI boots, `/healthz` 200 |
+| Verified | 24 tests pass against a real ADK `Runner`; FastAPI boots, `/healthz` 200 |
 | Measured | One full challenge (12 nodes, 6 tools) = **243k prompt / 66k billed output, ~$0.86**. Break-even at $29/seat ≈ **34 challenges/user/month** |
 | Fixed | The "exactly 4 tools" ceiling. Two causes, both live-only. See Known issues. |
-| Not run | CLIMB phase (Coach/Referee) end to end; group memory across two users |
+| Verified live | CLIMB end to end: node closed on evidence, feedback captured with reason, blocker -> group fact -> interview re-opened -> graph redrawn around the constraint |
+| Not run | Group memory across **two** users (single-user group memory works) |
 | Not built | Next.js front end, React Flow graph, Firebase Auth, Cloud Run deploy |
 
 Reproduce with `python scripts\live_walk.py` (costs ~$0.86, prints full token accounting).
@@ -112,6 +113,41 @@ checklist rather than blocking the graph.
 ---
 
 ## Known issues
+
+### Fixed: CLIMB deadlocked, then dropped feedback, then duplicated everything
+
+CLIMB is half the track brief ("guide the user step-by-step... capture feedback") and
+had never run. Four defects, in the order they surfaced:
+
+**1. Infinite delegation loop.** The Referee was a `mode="task"` sibling of the Coach
+under Warden. The Coach was told to "transfer to referee" -- unreachable from a sibling
+-- so it transferred up to Warden, whose instruction never mentioned a Referee. Warden
+improvised: `referee(...)` **25 times in one turn**, each returning nothing, each
+failure prompting another attempt. Fixed by making the Referee an `AgentTool` the Coach
+holds, plus an explicit Warden rule never to retry a silent delegation.
+
+**2. An AgentTool's agent must be `mode="chat"`.** An AgentTool runs its agent as a
+*root* agent, and ADK rejects a non-chat root. The Referee was `single_turn` and raised
+the moment it was called. **Scout had the identical defect sitting latent** -- it had
+simply never been invoked in any run. `tests/test_agent_wiring.py` now guards both.
+
+**3. Feedback went to the Referee and was lost.** "Thumbs up on that checklist" was
+routed as completion evidence; the Referee judged it against an acceptance criterion,
+returned NOT_MET, and `record_feedback` never fired. The Coach now owns `record_feedback`
+and `remember_group_fact` directly, with explicit turn-routing rules.
+
+**4. Re-planning appended instead of replacing.** After the blocker the graph was
+correctly redrawn -- and the challenge ended with **24 nodes**, the old plan and the new
+one side by side. `save_goal_graph` now marks dropped nodes `superseded`; anything
+already `done` keeps its status and evidence.
+
+**5. Group facts duplicated.** One constraint was stored three times because three
+agents phrased it three ways. Exact-string dedup missed all of it. Now compared on
+normalised content-word overlap. `tests/test_replan.py` uses the three real phrasings.
+
+Worth keeping: the Referee's *strictness* is not a bug. It rejected "I saved a
+screenshot" against a criterion asking for logs across three sample goals. That is the
+product working.
 
 ### Fixed: the "exactly 4 tools" ceiling
 

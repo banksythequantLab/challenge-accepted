@@ -10,7 +10,7 @@ from google.adk.agents import LlmAgent
 
 from . import config, prompts
 from .services.tools import read_challenge_state, write_journal
-from .sub_agents import archivist, cartographer, coach, forge, interviewer, referee
+from .sub_agents import archivist, cartographer, coach, forge, interviewer
 from .sub_agents.scout import scout_tool
 
 root_agent = LlmAgent(
@@ -22,7 +22,9 @@ root_agent = LlmAgent(
         "coaches them through it -- taking notes into shared group memory throughout."
     ),
     instruction=prompts.WARDEN,
-    sub_agents=[interviewer, cartographer, forge, coach, referee, archivist],
+    # Referee is deliberately NOT here. It reaches the Coach as an AgentTool instead --
+    # as a sibling it caused an infinite delegation loop live. See sub_agents/referee.py.
+    sub_agents=[interviewer, cartographer, forge, coach, archivist],
     tools=[scout_tool, read_challenge_state, write_journal],
 )
 

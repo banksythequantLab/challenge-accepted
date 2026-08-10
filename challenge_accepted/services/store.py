@@ -33,6 +33,32 @@ def new_id(prefix: str = "") -> str:
     return f"{prefix}{uuid.uuid4().hex[:12]}"
 
 
+#: Words carrying no distinguishing content, dropped before comparing two facts.
+_STOPWORDS = frozenset("""
+a an the and or but if then than that this these those of on in to for with without
+is are was were be been being do does did doing have has had having it its as at by
+from into over under not no need needs needed require requires required user users
+which who whom whose there their they them he she his her i you we us our your
+""".split())
+
+
+def _content_words(text: str) -> frozenset[str]:
+    cleaned = "".join(c.lower() if (c.isalnum() or c.isspace()) else " " for c in text)
+    return frozenset(w for w in cleaned.split() if w not in _STOPWORDS and len(w) > 2)
+
+
+def _similar(a: frozenset[str], b: frozenset[str], threshold: float = 0.6) -> bool:
+    """Jaccard-ish overlap against the SMALLER set.
+
+    Plain Jaccard is too strict here: a terse restatement of a verbose fact shares
+    almost all of its own words but only half the longer one's, so it reads as new.
+    Comparing against the smaller set catches the restatement.
+    """
+    if not a or not b:
+        return a == b
+    return len(a & b) / min(len(a), len(b)) >= threshold
+
+
 class Store:
     """Minimal repository. Swap the backend without touching agent code."""
 
@@ -122,14 +148,51 @@ class Store:
             patch["evidence"] = [*existing.get("evidence", []), evidence]
         self._patch("nodes", nid, patch)
 
-    def add_group_fact(self, group_id: str, fact: str) -> None:
-        """Goal-scoped shared memory. This is the group-intelligence primitive."""
-        existing = self.get("groups", group_id) or {"id": group_id, "members": [], "shared_facts": []}
+    def add_group_fact(self, group_id: str, fact: str) -> bool:
+        """Goal-scoped shared memory. This is the group-intelligence primitive.
+
+        Returns True if the fact was stored, False if it duplicated an existing one.
+
+        Exact-string dedup is not enough. A live run stored the same constraint three
+        times because three agents phrased it three ways:
+
+            "User lacks admin privileges on Google account required to enable Cloud Run billing."
+            "User lacks admin access on Google account required to enable billing for Cloud Run."
+            "Cloud Run requires Google account admin access to enable billing, which the user does not have."
+
+        A teammate reading that sees noise, not intelligence. We compare normalised
+        content-word sets instead, which collapses all three.
+        """
+        existing = self.get("groups", group_id) or {
+            "id": group_id, "members": [], "shared_facts": []
+        }
         facts = existing.get("shared_facts", [])
-        if fact not in facts:
-            facts.append(fact)
+        incoming = _content_words(fact)
+        for known in facts:
+            if _similar(incoming, _content_words(known)):
+                return False
+        facts.append(fact)
         existing["shared_facts"] = facts
         self._put("groups", group_id, existing)
+        return True
+
+    def supersede_nodes(self, challenge_id: str, keep_ids: list[str]) -> int:
+        """Retire nodes that a redrawn graph no longer contains.
+
+        Without this, re-planning APPENDS. One live run redrew a 12-node graph after a
+        blocker and ended up with 24 nodes -- the old plan and the new one side by side,
+        which is worse than either. Superseded nodes are kept (not deleted) so finished
+        work and its evidence stay auditable.
+        """
+        retired = 0
+        for node in self.list_nodes(challenge_id):
+            nid = node.get("id")
+            if nid in keep_ids or node.get("status") in ("done", "superseded"):
+                continue
+            self._patch("nodes", f"{challenge_id}:{nid}",
+                        {"status": "superseded", "updated_at": _now()})
+            retired += 1
+        return retired
 
     # -- reads ---------------------------------------------------------------
 
