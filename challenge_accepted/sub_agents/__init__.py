@@ -1,4 +1,4 @@
-"""The nine agents of Challenge Accepted.
+"""The nine agents of MicroGoals.
 
 Note two of them are exposed as AgentTools rather than as sub-agents:
 `scout_tool` (a built-in tool excludes all other tools on its agent) and

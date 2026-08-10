@@ -37,7 +37,7 @@ APP = "challenge_accepted"
 USER = "derek"
 
 TURNS = [
-    "I want to launch Challenge Accepted at the hackathon by Aug 31.",
+    "I want to launch MicroGoals at the hackathon by Aug 31.",
     "A deployed URL where a judge types a goal and watches agents build them a working "
     "tool, plus a 4-minute demo video submitted on Devpost.",
     "Hard deadline Aug 31, 5pm PDT. I get about 3 hours a night on weekdays and full "

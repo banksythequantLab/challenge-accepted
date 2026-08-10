@@ -76,7 +76,7 @@ async def main() -> None:
 
     graph = "\n".join(f"- {nid}: {desc}" for nid, desc in NODES)
     prompt = (
-        "Here is the saved goal graph for 'Launch Challenge Accepted at the hackathon "
+        "Here is the saved goal graph for 'Launch MicroGoals at the hackathon "
         "by Aug 31'. The user is a solo developer with 3 hours a night on weekdays, "
         "full days at weekends, who has never used Google ADK before and has run out "
         "of time on the demo video at two previous hackathons.\n\n"

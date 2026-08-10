@@ -1,4 +1,4 @@
-# Challenge Accepted
+# MicroGoals
 
 **Every other AI gives you a plan. This one builds you the tools.**
 

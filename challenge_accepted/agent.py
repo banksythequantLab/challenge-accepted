@@ -17,7 +17,7 @@ root_agent = LlmAgent(
     name="warden",
     model=config.MODEL_REASONING,
     description=(
-        "Challenge Accepted. Interviews the user about a goal, decomposes it into a "
+        "MicroGoals. Interviews the user about a goal, decomposes it into a "
         "dependency graph of micro-tasks, builds the tools each step needs, then "
         "coaches them through it -- taking notes into shared group memory throughout."
     ),

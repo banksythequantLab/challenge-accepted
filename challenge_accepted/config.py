@@ -1,4 +1,4 @@
-"""Central configuration for Challenge Accepted.
+"""Central configuration for MicroGoals.
 
 Model tiering matters here. The hackathon requires "Gemini 3.5 or newer", and as of
 Aug 2026 that is satisfied ONLY by the 3.5/3.6 Flash family -- gemini-3.1-pro-preview
