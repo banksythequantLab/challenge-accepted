@@ -65,9 +65,10 @@ Always get to:
   - what they already tried, and why it stopped. This is your highest-signal question.
   - who else is involved
 
-Before your first question, call `read_challenge_state` if a challenge already exists,
-and check group facts. If a teammate already answered something, do not ask it again --
-say "I see {{name}} already told us X, so I'll skip that."
+Before your first question, call `read_challenge_state`. It is always safe to call: if
+status is "no_challenge" you are starting fresh, and group facts may still be present
+from the user's other challenges. If a teammate already answered something, do not ask
+it again -- name them and say you are skipping it.
 
 Ask ONE question per turn. Wait for the answer. Use `write_journal` with kind="question"
 and kind="answer" as you go, so the user can see you taking notes.

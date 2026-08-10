@@ -58,7 +58,11 @@ quartermaster = LlmAgent(
 )
 
 
-SLOT_PREFIX = "forge.slot_"
+# Underscores only, no dots. ADK's instruction templating validates `{var}` names
+# against its state-name rules; a dotted key like "forge.slot_0" is not substituted and
+# the worker would receive the literal placeholder text instead of its spec.
+SLOT_PREFIX = "forge_slot_"
+QUEUE_KEY = "forge_queue"
 
 
 def _code_executor() -> BuiltInCodeExecutor:
@@ -118,7 +122,7 @@ class Dispatcher(BaseAgent):
     ) -> AsyncGenerator[Event, None]:
         state = ctx.session.state
 
-        queue = state.get("forge.queue")
+        queue = state.get(QUEUE_KEY)
         if queue is None:
             raw = state.get("tool_specs") or {}
             if isinstance(raw, str):
@@ -132,7 +136,7 @@ class Dispatcher(BaseAgent):
 
         batch, queue = queue[: self.workers], queue[self.workers :]
 
-        delta: dict[str, object] = {"forge.queue": queue}
+        delta: dict[str, object] = {QUEUE_KEY: queue}
         for i in range(self.workers):
             delta[f"{SLOT_PREFIX}{i}"] = batch[i] if i < len(batch) else None
 
@@ -170,4 +174,4 @@ forge = SequentialAgent(
     ],
 )
 
-__all__ = ["forge", "quartermaster", "Dispatcher", "ToolSpecList", "SLOT_PREFIX"]
+__all__ = ["forge", "quartermaster", "Dispatcher", "ToolSpecList", "SLOT_PREFIX", "QUEUE_KEY"]

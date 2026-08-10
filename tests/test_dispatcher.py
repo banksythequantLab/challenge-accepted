@@ -11,7 +11,14 @@ import pytest
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
-from challenge_accepted.sub_agents.forge import SLOT_PREFIX, Dispatcher
+from challenge_accepted.sub_agents.forge import QUEUE_KEY, SLOT_PREFIX, Dispatcher
+
+
+def test_state_keys_are_template_safe():
+    """ADK instruction templating rejects dotted state names, so a worker would get
+    the literal '{forge.slot_0?}' instead of its spec. Guard against regression."""
+    assert "." not in SLOT_PREFIX
+    assert "." not in QUEUE_KEY
 
 APP = "ca_test"
 USER = "u1"
@@ -56,7 +63,7 @@ async def test_fills_all_slots_and_leaves_remainder_queued():
 
     assigned = [state.get(f"{SLOT_PREFIX}{i}") for i in range(4)]
     assert [a["node_id"] for a in assigned] == ["n0", "n1", "n2", "n3"]
-    assert [s["node_id"] for s in state["forge.queue"]] == ["n4", "n5"]
+    assert [s["node_id"] for s in state[QUEUE_KEY]] == ["n4", "n5"]
 
 
 @pytest.mark.asyncio
@@ -67,7 +74,7 @@ async def test_skips_specs_that_need_no_tool():
     node_ids = [state[f"{SLOT_PREFIX}{i}"]["node_id"]
                 for i in range(4) if state.get(f"{SLOT_PREFIX}{i}")]
     assert node_ids == ["keep", "keep2"]
-    assert state["forge.queue"] == []
+    assert state[QUEUE_KEY] == []
 
 
 @pytest.mark.asyncio
@@ -91,4 +98,4 @@ async def test_accepts_json_string_output_from_quartermaster():
 async def test_empty_queue_terminates_the_loop():
     state = await _run_once({"tool_specs": {"specs": []}})
     assert all(state.get(f"{SLOT_PREFIX}{i}") is None for i in range(4))
-    assert state["forge.queue"] == []
+    assert state[QUEUE_KEY] == []

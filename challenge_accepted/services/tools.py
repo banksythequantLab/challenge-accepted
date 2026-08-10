@@ -2,22 +2,36 @@
 
 Every one of these writes to Firestore (or the local stub) rather than to session
 state, so parallel branches and other teammates see the same truth.
+
+DESIGN RULE, learned the hard way: a tool must never raise for a condition the model
+could legitimately produce. An exception inside a tool propagates up through the ADK
+node runner and kills the whole invocation -- one over-eager `read_challenge_state`
+before the charter existed took down an entire run. Tools return a status dict instead,
+and the model reads the status and adapts.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
 from google.adk.tools import ToolContext
 
 from .store import store
 
+PENDING_JOURNAL = "journal.pending"
 
-def _challenge_id(tool_context: ToolContext) -> str:
+
+def _challenge_id(tool_context: ToolContext) -> Optional[str]:
+    """Current challenge id, or None if the charter has not been saved yet."""
     cid = tool_context.state.get("challenge_id")
-    if not cid:
-        raise ValueError("No challenge_id in session state. Call save_charter first.")
-    return str(cid)
+    return str(cid) if cid else None
+
+
+def _group_id(tool_context: ToolContext) -> str:
+    gid = tool_context.state.get("group_id")
+    if gid:
+        return str(gid)
+    return f"grp_{tool_context.state.get('user_id', 'anon')}"
 
 
 def save_charter(
@@ -45,7 +59,7 @@ def save_charter(
         stakeholders: Other people involved in this challenge.
 
     Returns:
-        A dict with the new challenge_id.
+        A dict with status and the new challenge_id.
     """
     charter = {
         "title": title,
@@ -57,11 +71,18 @@ def save_charter(
         "stakeholders": stakeholders,
     }
     user_id = str(tool_context.state.get("user_id", "anon"))
-    group_id = str(tool_context.state.get("group_id", f"grp_{user_id}"))
+    group_id = _group_id(tool_context)
     cid = store.create_challenge(charter, owner_id=user_id, group_id=group_id)
+
     tool_context.state["challenge_id"] = cid
     tool_context.state["group_id"] = group_id
     tool_context.state["charter"] = charter
+
+    # Flush anything the Interviewer journalled before the charter existed.
+    for entry in tool_context.state.get(PENDING_JOURNAL) or []:
+        store.add_journal(cid, entry)
+    tool_context.state[PENDING_JOURNAL] = []
+
     store.add_journal(cid, {"actor": "Interviewer", "kind": "decision",
                             "text": f"Charter locked: {outcome}"})
     return {"status": "ok", "challenge_id": cid}
@@ -77,12 +98,15 @@ def save_goal_graph(nodes: list[dict], rationale: str,
         rationale: Two sentences on why the graph is shaped this way.
 
     Returns:
-        A dict with the count of nodes written.
+        A dict with status and the count of nodes written.
     """
     cid = _challenge_id(tool_context)
+    if not cid:
+        return {"status": "no_challenge",
+                "message": "No charter saved yet. The ACCEPT phase must finish first."}
     for node in nodes:
         store.put_node(cid, node)
-    tool_context.state["node_ids"] = [n["id"] for n in nodes]
+    tool_context.state["node_ids"] = [n.get("id") for n in nodes]
     store.add_journal(cid, {"actor": "Cartographer", "kind": "decision",
                             "text": f"Graph drawn: {len(nodes)} nodes. {rationale}"})
     return {"status": "ok", "node_count": len(nodes)}
@@ -104,9 +128,11 @@ def save_tool(node_id: str, tool_type: str, name: str, source: str, usage: str,
         smoke_test_output: What the smoke test actually printed.
 
     Returns:
-        A dict with the new tool_id.
+        A dict with status and the new tool_id.
     """
     cid = _challenge_id(tool_context)
+    if not cid:
+        return {"status": "no_challenge", "message": "No challenge open."}
     tid = store.put_tool(cid, node_id, {
         "type": tool_type, "name": name, "source": source, "usage": usage,
         "smoke_test_passed": smoke_test_passed, "smoke_test_output": smoke_test_output,
@@ -122,8 +148,8 @@ def write_journal(kind: str, text: str, actor: str, node_id: str,
                   tool_context: ToolContext) -> dict[str, Any]:
     """Write one visible note to the challenge journal.
 
-    The journal is shown to the user live. Write a note whenever you make a decision,
-    learn something surprising, or hit a blocker. Keep each note to one sentence.
+    Safe to call at any time, including before a charter exists -- early notes are
+    buffered and flushed the moment the charter is saved.
 
     Args:
         kind: One of decision, question, answer, insight, blocker, build.
@@ -132,12 +158,16 @@ def write_journal(kind: str, text: str, actor: str, node_id: str,
         node_id: Related node id, or empty string if not node-specific.
 
     Returns:
-        A dict with the journal entry id.
+        A status dict.
     """
+    entry = {"actor": actor, "kind": kind, "text": text, "node_id": node_id or None}
     cid = _challenge_id(tool_context)
-    jid = store.add_journal(cid, {"actor": actor, "kind": kind, "text": text,
-                                  "node_id": node_id or None})
-    return {"status": "ok", "entry_id": jid}
+    if not cid:
+        pending = list(tool_context.state.get(PENDING_JOURNAL) or [])
+        pending.append(entry)
+        tool_context.state[PENDING_JOURNAL] = pending
+        return {"status": "buffered", "pending": len(pending)}
+    return {"status": "ok", "entry_id": store.add_journal(cid, entry)}
 
 
 def record_feedback(target_type: str, target_id: str, verdict: str, reason: str,
@@ -151,9 +181,11 @@ def record_feedback(target_type: str, target_id: str, verdict: str, reason: str,
         reason: The user's stated reason, in their words.
 
     Returns:
-        A dict with the feedback id.
+        A status dict.
     """
     cid = _challenge_id(tool_context)
+    if not cid:
+        return {"status": "no_challenge", "message": "No challenge open."}
     fid = store.add_feedback(cid, {"target_type": target_type, "target_id": target_id,
                                    "verdict": verdict, "reason": reason})
     return {"status": "ok", "feedback_id": fid}
@@ -172,32 +204,43 @@ def remember_group_fact(fact: str, tool_context: ToolContext) -> dict[str, Any]:
     Returns:
         A status dict.
     """
+    store.add_group_fact(_group_id(tool_context), fact)
     cid = _challenge_id(tool_context)
-    group_id = str(tool_context.state.get("group_id", ""))
-    store.add_group_fact(group_id, fact)
-    store.add_journal(cid, {"actor": "Archivist", "kind": "insight", "text": fact})
+    if cid:
+        store.add_journal(cid, {"actor": "Archivist", "kind": "insight", "text": fact})
     return {"status": "ok"}
 
 
 def read_challenge_state(tool_context: ToolContext) -> dict[str, Any]:
     """Read the current challenge: charter, all nodes with status, and group facts.
 
-    Call this before guiding the user so you know where they actually are.
+    Safe to call before anything exists. When there is no challenge yet the status is
+    "no_challenge" and you should simply begin the interview from scratch -- group
+    facts are still returned, because the user may have history from other challenges.
 
     Returns:
-        A dict with charter, nodes, group_facts and tool summaries.
+        A dict with status, charter, nodes, tools and group_facts.
     """
+    group_facts = (store.get("groups", _group_id(tool_context)) or {}).get("shared_facts", [])
     cid = _challenge_id(tool_context)
+    if not cid:
+        return {
+            "status": "no_challenge",
+            "message": "No challenge started yet. Begin the interview from scratch.",
+            "charter": {},
+            "nodes": [],
+            "tools": [],
+            "group_facts": group_facts,
+        }
     challenge = store.get("challenges", cid) or {}
-    group_id = str(challenge.get("group_id", ""))
-    group = store.get("groups", group_id) or {}
     return {
+        "status": "ok",
         "challenge_id": cid,
         "charter": challenge.get("charter", {}),
         "nodes": store.list_nodes(cid),
-        "tools": [{"node_id": t["node_id"], "name": t.get("name"), "type": t.get("type")}
+        "tools": [{"node_id": t.get("node_id"), "name": t.get("name"), "type": t.get("type")}
                   for t in store.list_tools(cid)],
-        "group_facts": group.get("shared_facts", []),
+        "group_facts": group_facts,
     }
 
 
@@ -212,6 +255,8 @@ def complete_node(node_id: str, evidence: str, tool_context: ToolContext) -> dic
         A status dict.
     """
     cid = _challenge_id(tool_context)
+    if not cid:
+        return {"status": "no_challenge", "message": "No challenge open."}
     store.set_node_status(cid, node_id, "done", evidence)
     store.add_journal(cid, {"actor": "Referee", "kind": "decision", "node_id": node_id,
                             "text": f"Node '{node_id}' closed. Evidence: {evidence}"})
