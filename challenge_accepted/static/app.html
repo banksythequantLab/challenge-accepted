@@ -6,108 +6,208 @@
 <title>Challenge Accepted</title>
 <style>
   :root{
-    --bg:#0F1115; --panel:#171A21; --line:#252A34; --ink:#E8EAED; --dim:#9AA0A6;
-    --todo:#5F6368; --active:#4285F4; --blocked:#EA4335; --done:#34A853; --gold:#F9AB00;
+    --bg:#0B0D12; --panel:#12151D; --panel2:#171B25; --line:#232838;
+    --ink:#EDEFF3; --dim:#8B93A7; --faint:#5A6274;
+    --todo:#6B7385; --active:#4C8DFF; --blocked:#FF5C5C; --done:#3DD68C;
+    --gold:#FFC24B; --violet:#A78BFA;
+    --glow:0 0 24px rgba(76,141,255,.35);
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
-    font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
-  #app{display:grid;grid-template-columns:1fr 380px;grid-template-rows:auto 1fr;height:100%}
-  header{grid-column:1/-1;padding:14px 20px;border-bottom:1px solid var(--line);
-    display:flex;align-items:baseline;gap:16px;flex-wrap:wrap}
-  h1{font-size:17px;margin:0;font-weight:700;letter-spacing:.2px}
-  .tag{font-size:11px;color:var(--dim)}
-  .counts{margin-left:auto;display:flex;gap:14px;font-size:12px;color:var(--dim)}
-  .counts b{color:var(--ink);font-weight:600}
-  select{background:var(--panel);color:var(--ink);border:1px solid var(--line);
-    border-radius:6px;padding:5px 8px;font-size:12px;max-width:340px}
-  main{position:relative;overflow:auto;padding:24px}
-  aside{border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
-  .sect{padding:12px 16px;border-bottom:1px solid var(--line)}
-  .sect h2{font-size:11px;letter-spacing:.9px;text-transform:uppercase;color:var(--dim);
-    margin:0 0 8px}
+    font:14px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    overflow:hidden}
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
+    background:
+      radial-gradient(900px 500px at 12% -10%, rgba(76,141,255,.10), transparent 60%),
+      radial-gradient(800px 480px at 92% 6%, rgba(167,139,250,.09), transparent 62%),
+      radial-gradient(700px 500px at 60% 110%, rgba(61,214,140,.06), transparent 60%)}
+  #app{position:relative;z-index:1;display:grid;grid-template-columns:1fr 420px;
+    grid-template-rows:auto 1fr;height:100%}
+
+  header{grid-column:1/-1;padding:12px 20px;border-bottom:1px solid var(--line);
+    display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+    background:linear-gradient(180deg,rgba(255,255,255,.03),transparent)}
+  .logo{font-size:16px;font-weight:800;letter-spacing:.3px;
+    background:linear-gradient(92deg,#7FB2FF,#A78BFA 55%,#FFC24B);
+    -webkit-background-clip:text;background-clip:text;color:transparent;white-space:nowrap}
+  #title{font-size:14px;font-weight:650;color:var(--ink);
+    max-width:44ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #title.empty{color:var(--faint);font-weight:400;font-style:italic}
+  select{background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+    border-radius:8px;padding:6px 9px;font-size:12px;max-width:260px}
+  .stats{margin-left:auto;display:flex;align-items:center;gap:16px}
+  .stat{text-align:right;line-height:1.15}
+  .stat b{display:block;font-size:15px;font-weight:700}
+  .stat span{font-size:9.5px;letter-spacing:.9px;text-transform:uppercase;color:var(--faint)}
+  .xpwrap{width:150px}
+  .xpbar{height:7px;border-radius:99px;background:#1C2130;overflow:hidden;margin-top:5px;
+    border:1px solid var(--line)}
+  .xpfill{height:100%;width:0;border-radius:99px;transition:width .6s cubic-bezier(.2,.8,.2,1);
+    background:linear-gradient(90deg,#3DD68C,#7FB2FF)}
+  #live{font-size:10px;color:var(--done)}
+
+  main{position:relative;overflow:auto;padding:16px 20px 26px}
+  .maphead{display:flex;align-items:baseline;gap:12px;margin-bottom:6px}
+  .maphead h2{margin:0;font-size:12px;letter-spacing:1.4px;text-transform:uppercase;
+    color:var(--dim);font-weight:700}
+  .legend{display:flex;gap:12px;font-size:10.5px;color:var(--faint);margin-left:auto}
+  .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px}
+
+  aside{border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;
+    background:linear-gradient(180deg,rgba(255,255,255,.02),transparent)}
+  .tabs{display:flex;border-bottom:1px solid var(--line);flex:none}
+  .tab{flex:1;padding:10px 6px;text-align:center;font-size:11px;font-weight:700;
+    letter-spacing:.8px;text-transform:uppercase;color:var(--faint);cursor:pointer;
+    border-bottom:2px solid transparent}
+  .tab.on{color:var(--ink);border-bottom-color:var(--active)}
+  .pane{display:none;flex:1;min-height:0;flex-direction:column}
+  .pane.on{display:flex}
+
+  #chatlog{flex:1;overflow-y:auto;padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+  .msg{max-width:94%;padding:9px 12px;border-radius:12px;font-size:13px;white-space:pre-wrap;
+    word-wrap:break-word;animation:rise .25s ease}
+  @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+  .msg.me{align-self:flex-end;background:linear-gradient(135deg,#2A5BB8,#3A6FD8);
+    border:1px solid #4C8DFF44}
+  .msg.bot{align-self:flex-start;background:var(--panel2);border:1px solid var(--line)}
+  .msg .who{font-size:9.5px;letter-spacing:.9px;text-transform:uppercase;
+    color:var(--dim);margin-bottom:3px;font-weight:700}
+  .msg .body b.h{display:block;margin:9px 0 3px;font-size:11px;letter-spacing:.7px;
+    text-transform:uppercase;color:var(--violet)}
+  .msg .body b.h:first-child{margin-top:0}
+  .msg .body code{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;
+    background:rgba(255,255,255,.07);border-radius:4px;padding:1px 5px}
+  .msg.act{align-self:flex-start;background:transparent;border:1px dashed var(--line);
+    color:var(--dim);font-size:11.5px;padding:6px 10px;font-family:ui-monospace,Consolas,monospace}
+  .typing{display:inline-flex;gap:4px}
+  .typing i{width:5px;height:5px;border-radius:50%;background:var(--dim);
+    animation:blink 1.2s infinite}
+  .typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+  @keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+
+  .composer{flex:none;border-top:1px solid var(--line);padding:12px;
+    display:flex;gap:8px;align-items:flex-end;background:rgba(0,0,0,.25)}
+  textarea{flex:1;resize:none;background:var(--panel2);color:var(--ink);
+    border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;
+    font-size:13px;max-height:120px;min-height:42px}
+  textarea:focus{outline:none;border-color:var(--active);box-shadow:var(--glow)}
+  button{background:var(--panel2);color:var(--ink);border:1px solid var(--line);
+    border-radius:10px;padding:10px 14px;font-size:13px;font-weight:600;cursor:pointer;
+    transition:.15s}
+  button:hover:not(:disabled){border-color:var(--active);color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .send{background:linear-gradient(135deg,#3A6FD8,#4C8DFF);border-color:#4C8DFF66}
+
   #journal{flex:1;overflow-y:auto;padding:12px 16px}
-  .entry{padding:7px 0;border-bottom:1px solid #1D212A;font-size:12.5px}
+  .entry{padding:8px 0;border-bottom:1px solid #1A1E29;font-size:12.5px}
   .entry:last-child{border-bottom:0}
-  .who{font-weight:600;font-size:11px;letter-spacing:.3px}
-  .kind{font-size:9.5px;text-transform:uppercase;letter-spacing:.7px;padding:1px 6px;
-    border-radius:8px;margin-left:6px;background:#22262F;color:var(--dim)}
-  .kind.insight{background:#12301C;color:#81C995}
-  .kind.blocker{background:#3A1614;color:#F28B82}
-  .kind.build{background:#332600;color:#FDD663}
-  .kind.question,.kind.answer{background:#12233A;color:#8AB4F8}
-  .facts li{margin:5px 0;font-size:12.5px;color:#C7CBD1}
-  .facts{margin:0;padding-left:16px}
+  .who2{font-weight:700;font-size:11px}
+  .kind{font-size:9px;text-transform:uppercase;letter-spacing:.8px;padding:2px 7px;
+    border-radius:99px;margin-left:6px;background:#1E2432;color:var(--dim)}
+  .kind.insight{background:#0F2E1F;color:#7DE0AC}
+  .kind.blocker{background:#331416;color:#FF8A8A}
+  .kind.build{background:#332708;color:#FFD27A}
+  .kind.question,.kind.answer{background:#122540;color:#8FBBFF}
+  .facts{margin:0;padding:12px 16px 12px 30px}
+  .facts li{margin:6px 0;font-size:12.5px;color:#C3CAD8}
+
+  .quest{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:10px 16px;
+    background:var(--panel2)}
+  .quest h3{margin:0 0 4px;font-size:14px}
+  .crit{color:#C3CAD8;font-size:12.5px;margin:8px 0}
+  .tool{border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin:8px 0;
+    background:rgba(255,194,75,.05);font-size:12.5px}
+  .tool .t{font-size:9.5px;color:var(--gold);text-transform:uppercase;letter-spacing:.9px;
+    font-weight:700}
+  .row{display:flex;gap:7px;margin-top:9px}
+  .empty{color:var(--faint);padding:36px 20px;text-align:center;font-size:13px;line-height:1.7}
+  .empty b{color:var(--dim)}
+
   .node{cursor:pointer}
-  .node rect{transition:filter .12s}
-  .node:hover rect{filter:brightness(1.35)}
-  .node.sel rect{stroke:#fff;stroke-width:2.5}
-  .ready{animation:pulse 2.4s ease-in-out infinite}
-  @keyframes pulse{0%,100%{opacity:.35}50%{opacity:.95}}
-  .empty{color:var(--dim);padding:28px;text-align:center;font-size:13px}
-  button{background:var(--panel);color:var(--ink);border:1px solid var(--line);
-    border-radius:6px;padding:6px 11px;font-size:12.5px;cursor:pointer}
-  button:hover{border-color:#3C4350}
-  button.up:hover{border-color:var(--done);color:#81C995}
-  button.down:hover{border-color:var(--blocked);color:#F28B82}
-  .crit{color:#C7CBD1;font-size:12.5px;margin:6px 0 10px}
-  .tool{border:1px solid var(--line);border-radius:6px;padding:8px 10px;margin:6px 0;
-    font-size:12.5px}
-  .tool .t{font-size:10px;color:var(--gold);text-transform:uppercase;letter-spacing:.7px}
-  .legend{display:flex;gap:12px;font-size:11px;color:var(--dim);padding:0 24px 10px}
-  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:4px}
+  .node rect.card{transition:filter .15s}
+  .node:hover rect.card{filter:brightness(1.4)}
+  .node.sel rect.card{stroke-width:2.5}
+  .ready{animation:pulse 2.6s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:.3}50%{opacity:.9}}
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-thumb{background:#242A38;border-radius:99px}
+  ::-webkit-scrollbar-track{background:transparent}
 </style>
 </head>
 <body>
 <div id="app">
   <header>
-    <h1>Challenge Accepted</h1>
+    <div class="logo">CHALLENGE ACCEPTED</div>
     <select id="picker" title="Choose a challenge"></select>
-    <span class="tag" id="outcome"></span>
-    <div class="counts">
-      <span><b id="c-done">0</b>/<b id="c-nodes">0</b> steps</span>
-      <span><b id="c-tools">0</b> tools built</span>
-      <span id="live" style="color:var(--done)">&#9679; live</span>
+    <div id="title" class="empty">no quest yet — say what you want to make happen</div>
+    <div class="stats">
+      <div class="stat xpwrap">
+        <b><span id="c-done">0</span> / <span id="c-nodes">0</span></b>
+        <span>quests cleared</span>
+        <div class="xpbar"><div class="xpfill" id="xp"></div></div>
+      </div>
+      <div class="stat"><b id="c-tools">0</b><span>tools forged</span></div>
+      <div class="stat"><b id="live">●</b><span>live</span></div>
     </div>
   </header>
 
   <main>
-    <div class="legend">
-      <span><i class="dot" style="background:var(--todo)"></i>to do</span>
-      <span><i class="dot" style="background:var(--active)"></i>active</span>
-      <span><i class="dot" style="background:var(--done)"></i>done</span>
-      <span><i class="dot" style="background:var(--blocked)"></i>blocked</span>
-      <span style="margin-left:auto">click a step for detail</span>
+    <div class="maphead">
+      <h2>Quest Map</h2>
+      <div class="legend">
+        <span><i class="dot" style="background:var(--todo)"></i>locked</span>
+        <span><i class="dot" style="background:var(--active)"></i>ready</span>
+        <span><i class="dot" style="background:var(--done)"></i>cleared</span>
+        <span><i class="dot" style="background:var(--blocked)"></i>blocked</span>
+      </div>
     </div>
     <div id="graph"></div>
   </main>
 
   <aside>
-    <div class="sect">
-      <h2>Group intelligence</h2>
-      <ul class="facts" id="facts"><li class="tag">Nothing learned yet.</li></ul>
+    <div class="tabs">
+      <div class="tab on" data-p="chat">Talk</div>
+      <div class="tab" data-p="quest">Quest</div>
+      <div class="tab" data-p="journal">Journal</div>
+      <div class="tab" data-p="facts">Party</div>
     </div>
-    <div class="sect" id="detail-wrap" style="display:none">
-      <h2>Step detail</h2>
-      <div id="detail"></div>
+
+    <div class="pane on" id="p-chat">
+      <div id="chatlog"></div>
+      <div class="composer">
+        <textarea id="input" rows="1"
+          placeholder="What do you want to make happen?&#10;Shift+Enter for a new line"></textarea>
+        <button class="send" id="send">Send</button>
+      </div>
     </div>
-    <div class="sect" style="border-bottom:0;padding-bottom:6px">
-      <h2>Journal &mdash; what the agents noticed</h2>
-    </div>
-    <div id="journal"></div>
+
+    <div class="pane" id="p-quest"><div id="detail" class="empty">Pick a quest on the map.</div></div>
+    <div class="pane" id="p-journal"><div id="journal"></div></div>
+    <div class="pane" id="p-facts"><ul class="facts" id="facts"></ul></div>
   </aside>
 </div>
 
 <script>
 const $ = id => document.getElementById(id);
-const COLOR = {todo:'#5F6368', active:'#4285F4', blocked:'#EA4335',
-               done:'#34A853', superseded:'#DADCE0'};
-let challengeId = new URLSearchParams(location.search).get('id');
-let selected = null;
-let lastJournalCount = -1;
-
+const APP_NAME = "challenge_accepted";
 const esc = s => String(s ?? '').replace(/[&<>"]/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+let userId = localStorage.getItem('ca_user') ||
+             ('u_' + Math.random().toString(36).slice(2, 10));
+localStorage.setItem('ca_user', userId);
+let groupId = localStorage.getItem('ca_group') || ('grp_' + userId);
+localStorage.setItem('ca_group', groupId);
+
+let sessionId = null;
+let challengeId = new URLSearchParams(location.search).get('id');
+let selected = null, lastJournal = -1, busy = false;
+
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
+  document.querySelectorAll('.pane').forEach(p =>
+    p.classList.toggle('on', p.id === 'p-' + t.dataset.p));
+});
 
 async function api(path, opts) {
   const r = await fetch('/api' + path, opts);
@@ -115,161 +215,303 @@ async function api(path, opts) {
   return r.json();
 }
 
-async function pickChallenge() {
-  const {challenges} = await api('/challenges');
-  const picker = $('picker');
-  picker.innerHTML = challenges.map(c =>
-    `<option value="${esc(c.id)}">${esc(c.title)} (${c.nodes} steps)</option>`).join('');
-  if (!challenges.length) return false;
-  if (!challengeId || !challenges.some(c => c.id === challengeId)) {
-    challengeId = challenges[0].id;
+// The agents write markdown -- they are LLMs, that is what they do. Rendering the
+// common subset beats showing the user literal ### and **. Everything is escaped
+// first, so nothing here can inject markup.
+function md(text) {
+  return esc(text)
+    .replace(/^#{1,6}\s*(.+)$/gm, '<b class="h">$1</b>')
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/^\s*[-*]\s+/gm, '• ');
+}
+
+function bubble(cls, who, text) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + cls;
+  d.innerHTML = (who ? `<div class="who">${esc(who)}</div>` : '') +
+                `<div class="body">${md(text)}</div>`;
+  d._raw = text;
+  $('chatlog').appendChild(d);
+  $('chatlog').scrollTop = $('chatlog').scrollHeight;
+  return d;
+}
+
+//: Streamed chunks have to re-render the whole bubble -- markdown spans arrive split.
+function appendText(node, text) {
+  node._raw = (node._raw || '') + text;
+  node.querySelector('.body').innerHTML = md(node._raw);
+}
+
+async function ensureSession() {
+  if (sessionId) return sessionId;
+  sessionId = 's_' + Math.random().toString(36).slice(2, 10);
+  const state = { user_id: userId, group_id: groupId };
+  if (challengeId) state.challenge_id = challengeId;
+  const r = await fetch(`/apps/${APP_NAME}/users/${userId}/sessions/${sessionId}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ state }),
+  });
+  if (!r.ok) throw new Error('session create failed: ' + r.status);
+  return sessionId;
+}
+
+// Streams /run_sse and renders each agent event as it arrives.
+async function send() {
+  const text = $('input').value.trim();
+  if (!text || busy) return;
+  busy = true; $('send').disabled = true;
+  $('input').value = ''; $('input').style.height = 'auto';
+  bubble('me', null, text);
+
+  const thinking = bubble('bot', 'working',
+    '');
+  thinking.querySelector('.who').insertAdjacentHTML('afterend',
+    '<span class="typing"><i></i><i></i><i></i></span>');
+
+  try {
+    await ensureSession();
+    const res = await fetch('/run_sse', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        appName: APP_NAME, userId, sessionId, streaming: false,
+        newMessage: { role: 'user', parts: [{ text }] },
+      }),
+    });
+    if (!res.ok) throw new Error('run_sse ' + res.status);
+
+    thinking.remove();
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = '', lastAuthor = null, node = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const parts = buf.split('\n\n');
+      buf = parts.pop();
+      for (const chunk of parts) {
+        const line = chunk.split('\n').find(l => l.startsWith('data:'));
+        if (!line) continue;
+        let ev; try { ev = JSON.parse(line.slice(5).trim()); } catch { continue; }
+        for (const p of (ev.content?.parts || [])) {
+          if (p.text?.trim()) {
+            if (ev.author !== lastAuthor) { node = null; lastAuthor = ev.author; }
+            if (!node) node = bubble('bot', ev.author, p.text.trim());
+            else appendText(node, p.text);
+            $('chatlog').scrollTop = $('chatlog').scrollHeight;
+          }
+          if (p.functionCall) bubble('act', null, '⚙ ' + p.functionCall.name);
+          if (p.executableCode) bubble('act', null, '⌨ writing code…');
+          if (p.codeExecutionResult) bubble('act', null, '▶ ran it: ' +
+            (p.codeExecutionResult.outcome || '').replace('Outcome.', ''));
+        }
+      }
+    }
+    await adoptChallengeFromSession();
+    await refresh();
+  } catch (e) {
+    thinking.remove();
+    bubble('act', null, '✖ ' + e.message);
+  } finally {
+    busy = false; $('send').disabled = false; $('input').focus();
   }
-  picker.value = challengeId;
-  picker.onchange = () => {
-    challengeId = picker.value; selected = null; lastJournalCount = -1; refresh();
-  };
-  return true;
 }
 
-// Curved edge, drawn left-to-right so the dependency direction reads at a glance.
+// The Interviewer writes challenge_id into session state once the charter is saved.
+// Pick it up so the header, map and journal bind to the new quest automatically.
+async function adoptChallengeFromSession() {
+  try {
+    const r = await fetch(`/apps/${APP_NAME}/users/${userId}/sessions/${sessionId}`);
+    if (!r.ok) return;
+    const s = await r.json();
+    const cid = s?.state?.challenge_id;
+    if (cid && cid !== challengeId) {
+      challengeId = cid; lastJournal = -1;
+      history.replaceState(null, '', '?id=' + cid);
+    }
+  } catch {}
+}
+
+$('send').onclick = send;
+$('input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+});
+$('input').addEventListener('input', e => {
+  e.target.style.height = 'auto';
+  e.target.style.height = Math.min(120, e.target.scrollHeight) + 'px';
+});
+
 function edgePath(a, b) {
-  const x1 = a.x + 220, y1 = a.y + 32, x2 = b.x, y2 = b.y + 32;
-  const mid = (x1 + x2) / 2;
-  return `M${x1},${y1} C${mid},${y1} ${mid},${y2} ${x2},${y2}`;
+  const x1 = a.x + 230, y1 = a.y + 34, x2 = b.x, y2 = b.y + 34;
+  const m = (x1 + x2) / 2;
+  return `M${x1},${y1} C${m},${y1} ${m},${y2} ${x2},${y2}`;
 }
 
-function drawGraph(graph) {
-  if (!graph.nodes.length) {
-    $('graph').innerHTML = '<div class="empty">No steps yet. Start a challenge in the '
-      + 'agent UI, then this fills in.</div>';
+function drawGraph(g) {
+  if (!g.nodes.length) {
+    $('graph').innerHTML = '<div class="empty">Your quest map is empty.<br>' +
+      '<b>Tell me what you want to make happen</b> — over in Talk.</div>';
     return;
   }
-  const pos = {};
-  graph.nodes.forEach(n => pos[n.id] = n.position);
-  const W = Math.max(...graph.nodes.map(n => n.position.x)) + 300;
-  const H = Math.max(...graph.nodes.map(n => n.position.y)) + 120;
+  const pos = {}; g.nodes.forEach(n => pos[n.id] = n.position);
+  const W = Math.max(...g.nodes.map(n => n.position.x)) + 300;
+  const H = Math.max(...g.nodes.map(n => n.position.y)) + 130;
 
-  const edges = graph.edges.map(e => {
+  const edges = g.edges.map(e => {
     const a = pos[e.source], b = pos[e.target];
-    if (!a || !b) return '';
-    return `<path d="${edgePath(a,b)}" fill="none" stroke="#2C323D" stroke-width="1.6"
-             marker-end="url(#arrow)"/>`;
+    return (a && b) ? `<path d="${edgePath(a,b)}" fill="none" stroke="#2A3040"
+      stroke-width="1.7" marker-end="url(#ar)"/>` : '';
   }).join('');
 
-  const nodes = graph.nodes.map(n => {
+  const nodes = g.nodes.map(n => {
     const d = n.data, sel = n.id === selected ? ' sel' : '';
-    const label = d.label.length > 30 ? d.label.slice(0, 29) + '…' : d.label;
-    const toolBadge = d.tools.length
-      ? `<circle cx="206" cy="14" r="8" fill="#F9AB00"/>
-         <text x="206" y="18" text-anchor="middle" font-size="10" font-weight="700"
-               fill="#1A1A1A">${d.tools.length}</text>` : '';
-    const readyRing = d.ready
-      ? `<rect class="ready" x="-3" y="-3" width="226" height="70" rx="10" fill="none"
-             stroke="#4285F4" stroke-width="2"/>` : '';
+    const label = d.label.length > 28 ? d.label.slice(0, 27) + '…' : d.label;
+    const badge = d.tools.length ? `<g>
+        <circle cx="212" cy="16" r="9" fill="#FFC24B"/>
+        <text x="212" y="20" text-anchor="middle" font-size="10.5" font-weight="800"
+              fill="#1A1A1A">${d.tools.length}</text></g>` : '';
+    const ring = d.ready ? `<rect class="ready" x="-4" y="-4" width="238" height="76"
+        rx="14" fill="none" stroke="#4C8DFF" stroke-width="2.5"/>` : '';
+    const check = d.status === 'done'
+      ? `<text x="206" y="52" font-size="15" fill="#3DD68C">✔</text>` : '';
     return `<g class="node${sel}" transform="translate(${n.position.x},${n.position.y})"
               data-id="${esc(n.id)}">
-        ${readyRing}
-        <rect width="220" height="64" rx="8" fill="#171A21" stroke="${d.color}"
-              stroke-width="1.6"/>
-        <rect width="4" height="64" rx="2" fill="${d.color}"/>
-        <text x="14" y="25" font-size="12.5" font-weight="600" fill="#E8EAED">${esc(label)}</text>
-        <text x="14" y="44" font-size="10.5" fill="#9AA0A6">${esc(d.status)}${
-          d.effort_mins ? ' · ' + d.effort_mins + 'm' : ''}</text>
-        ${toolBadge}
+        ${ring}
+        <rect class="card" width="230" height="68" rx="12" fill="#12151D"
+              stroke="${d.color}" stroke-width="1.6"/>
+        <rect width="4" height="68" rx="2" fill="${d.color}"/>
+        <text x="16" y="27" font-size="13" font-weight="650" fill="#EDEFF3">${esc(label)}</text>
+        <text x="16" y="47" font-size="10.5" fill="#8B93A7">${esc(d.status)}${
+          d.effort_mins ? ' · ' + d.effort_mins + ' min' : ''}</text>
+        ${badge}${check}
       </g>`;
   }).join('');
 
   $('graph').innerHTML = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
-      <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6"
-             markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2C323D"/>
-      </marker></defs>${edges}${nodes}</svg>`;
+    <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6"
+      markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2A3040"/></marker>
+    </defs>${edges}${nodes}</svg>`;
 
-  $('graph').querySelectorAll('.node').forEach(g => {
-    g.onclick = () => {
-      selected = g.dataset.id;
-      showDetail(graph.nodes.find(n => n.id === selected));
-      drawGraph(graph);
-    };
+  $('graph').querySelectorAll('.node').forEach(el => el.onclick = () => {
+    selected = el.dataset.id;
+    showQuest(g.nodes.find(n => n.id === selected));
+    document.querySelector('.tab[data-p="quest"]').click();
+    drawGraph(g);
   });
 }
 
-function showDetail(node) {
-  if (!node) return;
-  const d = node.data;
-  $('detail-wrap').style.display = 'block';
-  $('detail').innerHTML = `
-    <div style="font-weight:600;margin-bottom:2px">${esc(d.label)}</div>
-    <div class="tag">${esc(d.status)}${d.assignee ? ' · ' + esc(d.assignee) : ''}</div>
-    <div class="crit"><b>Done when:</b> ${esc(d.acceptance_criteria)}</div>
-    ${d.evidence?.length ? `<div class="crit"><b>Evidence:</b> ${
+function showQuest(n) {
+  if (!n) return;
+  const d = n.data;
+  $('detail').className = '';
+  $('detail').innerHTML = `<div class="quest">
+    <h3>${esc(d.label)}</h3>
+    <div style="font-size:11px;color:var(--dim)">${esc(d.status)}${
+      d.effort_mins ? ' · ' + d.effort_mins + ' min' : ''}</div>
+    <div class="crit"><b>Cleared when:</b> ${esc(d.acceptance_criteria)}</div>
+    ${d.evidence?.length ? `<div class="crit"><b>Proof:</b> ${
       d.evidence.map(esc).join('; ')}</div>` : ''}
     ${d.tools.map(t => `<div class="tool">
         <div class="t">${esc(t.type)}${t.degraded ? ' · degraded' : ''}</div>
         <div>${esc(t.name)}</div>
-        <div style="margin-top:7px;display:flex;gap:6px">
-          <button class="up"   data-fb="up"   data-t="${esc(t.id)}">&#128077; helpful</button>
-          <button class="down" data-fb="down" data-t="${esc(t.id)}">&#128078; not useful</button>
-        </div>
-      </div>`).join('') || '<div class="tag">No tool needed for this step.</div>'}`;
+        <div class="row">
+          <button data-fb="up"   data-t="${esc(t.id)}">👍 helped</button>
+          <button data-fb="down" data-t="${esc(t.id)}">👎 didn't</button>
+        </div></div>`).join('') ||
+      '<div style="color:var(--faint);font-size:12.5px">No tool needed here.</div>'}
+    <div class="row"><button id="workon">Work on this</button></div>
+  </div>`;
 
-  $('detail').querySelectorAll('[data-fb]').forEach(b => {
-    b.onclick = async () => {
-      const reason = prompt('One line on why (optional):') || '';
-      await api(`/challenges/${challengeId}/feedback`, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({target_type: 'tool', target_id: b.dataset.t,
-                              verdict: b.dataset.fb, reason}),
-      });
-      b.textContent = 'recorded ✓';
-      b.disabled = true;
-    };
+  const w = $('workon');
+  if (w) w.onclick = () => {
+    document.querySelector('.tab[data-p="chat"]').click();
+    $('input').value = `Let's work on "${d.label}". What do I do first?`;
+    $('input').focus();
+  };
+  $('detail').querySelectorAll('[data-fb]').forEach(b => b.onclick = async () => {
+    const reason = prompt('One line on why (optional):') || '';
+    await api(`/challenges/${challengeId}/feedback`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ target_type: 'tool', target_id: b.dataset.t,
+                             verdict: b.dataset.fb, reason }),
+    });
+    b.textContent = 'recorded ✓'; b.disabled = true;
   });
 }
 
 function drawJournal(entries) {
-  if (entries.length === lastJournalCount) return;   // avoid clobbering scroll
-  lastJournalCount = entries.length;
+  if (entries.length === lastJournal) return;
+  lastJournal = entries.length;
   const el = $('journal');
   const stick = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
   el.innerHTML = entries.map(e => `<div class="entry">
-      <span class="who">${esc(e.actor)}</span>
+      <span class="who2">${esc(e.actor)}</span>
       <span class="kind ${esc(e.kind)}">${esc(e.kind)}</span>
       <div>${esc(e.text)}</div></div>`).join('')
-    || '<div class="tag">No notes yet.</div>';
+    || '<div class="empty">No notes yet.</div>';
   if (stick) el.scrollTop = el.scrollHeight;
+}
+
+async function pickChallenge() {
+  const { challenges } = await api('/challenges');
+  const p = $('picker');
+  p.innerHTML = challenges.map(c =>
+    `<option value="${esc(c.id)}">${esc(c.title)}</option>`).join('')
+    || '<option value="">— no quests yet —</option>';
+  p.style.display = challenges.length ? '' : 'none';
+  if (challenges.length && (!challengeId || !challenges.some(c => c.id === challengeId)))
+    challengeId = challenges[0].id;
+  if (challengeId) p.value = challengeId;
+  p.onchange = () => { challengeId = p.value; selected = null; lastJournal = -1;
+                       sessionId = null; history.replaceState(null,'','?id='+challengeId);
+                       refresh(); };
+  return challenges.length > 0;
 }
 
 async function refresh() {
   try {
-    if (!challengeId && !(await pickChallenge())) {
-      $('graph').innerHTML = '<div class="empty">No challenges yet. Run '
-        + '<code>adk web</code> or <code>scripts\\live_walk.py</code> to create one.</div>';
+    await pickChallenge();
+    if (!challengeId) {
+      drawGraph({ nodes: [], edges: [] });
+      $('title').className = 'empty';
+      $('title').textContent = 'no quest yet — say what you want to make happen';
       return;
     }
-    const [summary, graph, journal] = await Promise.all([
+    const [s, g, j] = await Promise.all([
       api(`/challenges/${challengeId}`),
       api(`/challenges/${challengeId}/graph`),
       api(`/challenges/${challengeId}/journal`),
     ]);
-    $('outcome').textContent = summary.charter.outcome || '';
-    $('c-done').textContent = summary.counts.done;
-    $('c-nodes').textContent = summary.counts.nodes;
-    $('c-tools').textContent = summary.counts.tools;
-    $('facts').innerHTML = summary.group_facts.length
-      ? summary.group_facts.map(f => `<li>${esc(f)}</li>`).join('')
-      : '<li class="tag">Nothing learned yet.</li>';
-    drawGraph(graph);
-    drawJournal(journal.entries);
-    if (selected) showDetail(graph.nodes.find(n => n.id === selected));
+    // The title fills itself in the moment the charter is saved.
+    const name = s.charter.title || s.charter.outcome || '';
+    $('title').className = name ? '' : 'empty';
+    $('title').textContent = name || 'no quest yet — say what you want to make happen';
+    $('c-done').textContent = s.counts.done;
+    $('c-nodes').textContent = s.counts.nodes;
+    $('c-tools').textContent = s.counts.tools;
+    $('xp').style.width = (s.counts.nodes
+      ? Math.round(100 * s.counts.done / s.counts.nodes) : 0) + '%';
+    $('facts').innerHTML = s.group_facts.length
+      ? s.group_facts.map(f => `<li>${esc(f)}</li>`).join('')
+      : '<li style="color:var(--faint)">Nothing learned yet. Discoveries land here for the whole party.</li>';
+    drawGraph(g);
+    drawJournal(j.entries);
+    if (selected) showQuest(g.nodes.find(n => n.id === selected));
     $('live').style.color = 'var(--done)';
-  } catch (err) {
+  } catch (e) {
     $('live').style.color = 'var(--blocked)';
-    console.error(err);
+    console.error(e);
   }
 }
 
-pickChallenge().then(refresh);
-setInterval(refresh, 3000);
+bubble('bot', 'warden',
+  "Tell me something you want to be true that isn't yet.\n\n" +
+  "I'll ask a few questions, map it into quests, then build the tools each one needs.");
+refresh();
+setInterval(() => { if (!busy) refresh(); }, 4000);
+$('input').focus();
 </script>
 </body>
 </html>

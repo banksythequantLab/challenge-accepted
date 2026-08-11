@@ -24,3 +24,10 @@ _ui_copy.png
 _deploy.log
 _deploy.err
 _logs.txt
+
+# Playwright / probe artifacts
+_chat.png
+_chat.err
+_s*.jpg
+_ui.b64
+challenge_accepted/.adk/
