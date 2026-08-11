@@ -119,9 +119,25 @@
     background:rgba(255,194,75,.05);font-size:12.5px}
   .tool .t{font-size:9.5px;color:var(--gold);text-transform:uppercase;letter-spacing:.9px;
     font-weight:700}
-  .row{display:flex;gap:7px;margin-top:9px}
+  .row{display:flex;gap:7px;margin-top:9px;flex-wrap:wrap}
   .empty{color:var(--faint);padding:36px 20px;text-align:center;font-size:13px;line-height:1.7}
   .empty b{color:var(--dim)}
+
+  /* Copy affordances. The point of this app is that you take the instructions
+     somewhere else and act on them -- usually into Claude. Make that one click. */
+  .copy{position:absolute;top:5px;right:5px;padding:3px 8px;font-size:10px;font-weight:700;
+    letter-spacing:.6px;text-transform:uppercase;border-radius:7px;opacity:0;
+    background:var(--panel);border:1px solid var(--line);color:var(--dim);
+    transition:opacity .15s,color .15s,border-color .15s}
+  .msg{position:relative}
+  .msg:hover .copy,.copy:focus{opacity:1}
+  .copy.done{opacity:1;color:var(--done);border-color:var(--done)}
+  /* Reveal-on-hover hides the button forever on a touch screen, which is exactly
+     where copying into another app matters most. Keep it visible there. */
+  @media (hover:none){ .copy{opacity:.75} }
+  .ghost{background:transparent;border:1px solid var(--line);color:var(--dim);
+    font-size:11.5px;padding:7px 11px}
+  .claude{background:linear-gradient(135deg,#7A4B2A,#C1683A);border-color:#C1683A88;color:#fff}
 
   .node{cursor:pointer}
   .node rect.card{transition:filter .15s}
@@ -129,6 +145,18 @@
   .node.sel rect.card{stroke-width:2.5}
   .ready{animation:pulse 2.6s ease-in-out infinite}
   @keyframes pulse{0%,100%{opacity:.3}50%{opacity:.9}}
+  /* Phone: stack the map above the panel instead of crushing it into a sliver.
+     You scanned a QR to get here; the copy buttons have to be reachable. */
+  @media (max-width:820px){
+    #app{grid-template-columns:1fr;grid-template-rows:auto 38vh 1fr}
+    aside{border-left:0;border-top:1px solid var(--line)}
+    header{padding:10px 14px;gap:10px}
+    #title{max-width:100%;flex-basis:100%;order:9}
+    .stats{gap:12px}
+    .xpwrap{width:110px}
+    main{padding:12px 14px 18px}
+  }
+
   ::-webkit-scrollbar{width:9px;height:9px}
   ::-webkit-scrollbar-thumb{background:#242A38;border-radius:99px}
   ::-webkit-scrollbar-track{background:transparent}
@@ -177,6 +205,8 @@
       <div class="composer">
         <textarea id="input" rows="1"
           placeholder="What do you want to make happen?&#10;Shift+Enter for a new line"></textarea>
+        <button class="ghost" id="copyall"
+                title="Copy the whole conversation as markdown">⧉</button>
         <button class="send" id="send">Send</button>
       </div>
     </div>
@@ -202,6 +232,9 @@ localStorage.setItem('ca_group', groupId);
 let sessionId = null;
 let challengeId = new URLSearchParams(location.search).get('id');
 let selected = null, lastJournal = -1, busy = false;
+//: Kept around so "Copy for Claude" can package a step with the goal it serves and
+//: the full source of any tool built for it -- the graph endpoint only carries stubs.
+let charter = {}, groupFacts = [], toolsById = {};
 
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
   document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x === t));
@@ -226,12 +259,44 @@ function md(text) {
     .replace(/^\s*[-*]\s+/gm, '• ');
 }
 
+// navigator.clipboard needs a secure context. Cloud Run is HTTPS and localhost counts,
+// but a plain-http LAN test would silently fail, so fall back to a throwaway textarea.
+async function copyText(text, btn) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const t = document.createElement('textarea');
+    t.value = text;
+    t.style.cssText = 'position:fixed;opacity:0';
+    document.body.appendChild(t);
+    t.select();
+    try { document.execCommand('copy'); } finally { t.remove(); }
+  }
+  if (!btn) return;
+  const was = btn.textContent;
+  btn.textContent = 'Copied ✓';
+  btn.classList.add('done');
+  setTimeout(() => { btn.textContent = was; btn.classList.remove('done'); }, 1600);
+}
+
+//: Copies the RAW markdown the agent wrote, not the rendered HTML -- pasting
+//: `### Step 1` into Claude is far more useful than pasting a styled <b>.
+function addCopy(node, getText) {
+  const b = document.createElement('button');
+  b.className = 'copy';
+  b.textContent = 'Copy';
+  b.title = 'Copy this as markdown, ready to paste into Claude';
+  b.onclick = e => { e.stopPropagation(); copyText(getText(), b); };
+  node.appendChild(b);
+}
+
 function bubble(cls, who, text) {
   const d = document.createElement('div');
   d.className = 'msg ' + cls;
   d.innerHTML = (who ? `<div class="who">${esc(who)}</div>` : '') +
                 `<div class="body">${md(text)}</div>`;
   d._raw = text;
+  if (cls === 'bot' && text) addCopy(d, () => d._raw);
   $('chatlog').appendChild(d);
   $('chatlog').scrollTop = $('chatlog').scrollHeight;
   return d;
@@ -334,6 +399,17 @@ async function adoptChallengeFromSession() {
   } catch {}
 }
 
+// Whole transcript as markdown. Tool-call chips are dropped -- they are UI chrome,
+// not something you want cluttering a paste into Claude.
+$('copyall').onclick = () => {
+  const out = [...document.querySelectorAll('#chatlog .msg')]
+    .filter(m => !m.classList.contains('act'))
+    .map(m => (m.classList.contains('me') ? '## Me' : '## ' +
+      (m.querySelector('.who')?.textContent || 'Agent')) + '\n' + (m._raw || ''));
+  const head = charter.title || charter.outcome;
+  copyText((head ? `# ${head}\n\n` : '') + out.join('\n\n'), $('copyall'));
+};
+
 $('send').onclick = send;
 $('input').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
@@ -402,6 +478,39 @@ function drawGraph(g) {
   });
 }
 
+// Everything Claude needs to actually help with this step, in one paste: the goal it
+// serves, the step, how you know you're done, and the source of any tool the agents
+// built for it. Without the charter the step reads as context-free busywork.
+function questPrompt(n) {
+  const d = n.data;
+  const c = charter || {};
+  const L = [];
+  if (c.title || c.outcome) L.push(`I'm working toward: ${c.title || c.outcome}`);
+  if (c.outcome && c.title && c.outcome !== c.title) L.push(`The outcome I want: ${c.outcome}`);
+  if (c.definition_of_done) L.push(`Definition of done: ${c.definition_of_done}`);
+  if (c.deadline) L.push(`Deadline: ${c.deadline}`);
+  if ((c.constraints || []).length) L.push(`My constraints: ${c.constraints.join('; ')}`);
+  if (groupFacts.length) L.push(`What we've learned so far: ${groupFacts.join('; ')}`);
+
+  L.push('', `## The step I'm on: ${d.label}`);
+  if (d.description) L.push(d.description);
+  L.push(`Cleared when: ${d.acceptance_criteria}`);
+  if (d.effort_mins) L.push(`Estimated effort: ${d.effort_mins} minutes`);
+  if ((d.evidence || []).length) L.push(`Proof recorded so far: ${d.evidence.join('; ')}`);
+
+  for (const t of d.tools) {
+    const full = toolsById[t.id] || {};
+    L.push('', `## Tool my agents built for this step: ${t.name} (${t.type})`);
+    if (full.usage) L.push(full.usage);
+    if (full.degraded || t.degraded)
+      L.push('Note: this one degraded to a plain checklist -- the build failed.');
+    if (full.source) L.push('', '```', full.source, '```');
+  }
+
+  L.push('', 'Walk me through actually doing this step. Ask me anything you need.');
+  return L.join('\n');
+}
+
 function showQuest(n) {
   if (!n) return;
   const d = n.data;
@@ -419,9 +528,14 @@ function showQuest(n) {
         <div class="row">
           <button data-fb="up"   data-t="${esc(t.id)}">👍 helped</button>
           <button data-fb="down" data-t="${esc(t.id)}">👎 didn't</button>
+          <button class="ghost" data-tool="${esc(t.id)}">Copy tool</button>
         </div></div>`).join('') ||
       '<div style="color:var(--faint);font-size:12.5px">No tool needed here.</div>'}
-    <div class="row"><button id="workon">Work on this</button></div>
+    <div class="row">
+      <button id="workon">Work on this</button>
+      <button id="forclaude" class="claude" title="Copy this step, the goal it serves,
+and any tool built for it -- paste straight into Claude">Copy for Claude</button>
+    </div>
   </div>`;
 
   const w = $('workon');
@@ -430,6 +544,16 @@ function showQuest(n) {
     $('input').value = `Let's work on "${d.label}". What do I do first?`;
     $('input').focus();
   };
+  const fc = $('forclaude');
+  if (fc) fc.onclick = () => copyText(questPrompt(n), fc);
+  $('detail').querySelectorAll('[data-tool]').forEach(b => b.onclick = () => {
+    const t = toolsById[b.dataset.tool] || {};
+    const parts = [`# ${t.name || 'Tool'} (${t.type || 'tool'})`];
+    if (t.usage) parts.push('', t.usage);
+    if (t.source) parts.push('', '```', t.source, '```');
+    if (t.smoke_test_output) parts.push('', `Smoke test output: ${t.smoke_test_output}`);
+    copyText(parts.join('\n'), b);
+  });
   $('detail').querySelectorAll('[data-fb]').forEach(b => b.onclick = async () => {
     const reason = prompt('One line on why (optional):') || '';
     await api(`/challenges/${challengeId}/feedback`, {
@@ -479,11 +603,15 @@ async function refresh() {
       $('title').textContent = 'no quest yet — say what you want to make happen';
       return;
     }
-    const [s, g, j] = await Promise.all([
+    const [s, g, j, t] = await Promise.all([
       api(`/challenges/${challengeId}`),
       api(`/challenges/${challengeId}/graph`),
       api(`/challenges/${challengeId}/journal`),
+      api(`/challenges/${challengeId}/tools`),
     ]);
+    charter = s.charter || {};
+    groupFacts = s.group_facts || [];
+    toolsById = Object.fromEntries((t.tools || []).map(x => [x.id, x]));
     // The title fills itself in the moment the charter is saved.
     const name = s.charter.title || s.charter.outcome || '';
     $('title').className = name ? '' : 'empty';
