@@ -68,6 +68,9 @@ def main() -> str:
         },
         owner_id="derek", group_id="grp_team",
     )
+    # The founder is on the roster from the start, so "1 in party" is true rather than
+    # a hardcoded floor -- and a teammate arriving moves it to 2 for real.
+    store.join_group("grp_team", "derek")
 
     for nid, title, deps, status, mins in NODES:
         store.put_node(cid, {

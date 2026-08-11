@@ -206,6 +206,23 @@ class Store:
             patch["evidence"] = [*existing.get("evidence", []), evidence]
         self._patch("nodes", nid, patch)
 
+    def join_group(self, group_id: str, user_id: str) -> list[str]:
+        """Put a user on the party roster. Idempotent. Returns the full roster.
+
+        Membership is what makes "shared" mean anything. Without it a group is an
+        anonymous bucket of facts and there is no way to answer "who else is on
+        this?" -- which is the whole premise of the collaborative track.
+        """
+        existing = self.get("groups", group_id) or {
+            "id": group_id, "members": [], "shared_facts": []
+        }
+        members = list(existing.get("members", []))
+        if user_id and user_id not in members:
+            members.append(user_id)
+            existing["members"] = members
+            self._put("groups", group_id, existing)
+        return members
+
     def add_group_fact(self, group_id: str, fact: str) -> bool:
         """Goal-scoped shared memory. This is the group-intelligence primitive.
 

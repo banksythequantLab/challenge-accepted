@@ -19,6 +19,7 @@ from google.adk.tools import ToolContext
 from .store import store
 
 PENDING_JOURNAL = "journal.pending"
+JOINED_GROUP = "joined_group"
 
 
 def _challenge_id(tool_context: ToolContext) -> Optional[str]:
@@ -27,7 +28,38 @@ def _challenge_id(tool_context: ToolContext) -> Optional[str]:
     return str(cid) if cid else None
 
 
+def _join_party(tool_context: ToolContext, group_id: str) -> None:
+    """Add the user to the group roster, at most once per session.
+
+    Guarded by a state flag because _group_id runs on every tool call and this is a
+    Firestore write. One write when a teammate first touches the challenge, none
+    after that.
+    """
+    if tool_context.state.get(JOINED_GROUP) == group_id:
+        return
+    store.join_group(group_id, str(tool_context.state.get("user_id", "anon")))
+    tool_context.state[JOINED_GROUP] = group_id
+
+
 def _group_id(tool_context: ToolContext) -> str:
+    """The party this work belongs to.
+
+    The challenge document is the source of truth, NOT session state. A teammate
+    who opens /app?id=<cid> arrives carrying a group_id minted from their own
+    localStorage, which will never match the group that owns the challenge. If we
+    trusted that, every discovery they made would be filed under a party of one and
+    `read_challenge_state` would hand them an empty group_facts list -- the exact
+    opposite of the feature. So resolve through the challenge whenever there is one,
+    and fall back to state only before a charter exists.
+    """
+    cid = tool_context.state.get("challenge_id")
+    if cid:
+        owner_group = (store.get("challenges", str(cid)) or {}).get("group_id")
+        if owner_group:
+            # Write it back so anything reading state directly agrees with us.
+            tool_context.state["group_id"] = str(owner_group)
+            _join_party(tool_context, str(owner_group))
+            return str(owner_group)
     gid = tool_context.state.get("group_id")
     if gid:
         return str(gid)
@@ -77,6 +109,9 @@ def save_charter(
     tool_context.state["challenge_id"] = cid
     tool_context.state["group_id"] = group_id
     tool_context.state["charter"] = charter
+    # The founder is party member #1, so the roster is never empty for a live challenge.
+    store.join_group(group_id, user_id)
+    tool_context.state[JOINED_GROUP] = group_id
 
     # Flush anything the Interviewer journalled before the charter existed.
     for entry in tool_context.state.get(PENDING_JOURNAL) or []:

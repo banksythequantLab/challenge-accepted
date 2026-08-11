@@ -21,7 +21,18 @@ param(
     [switch]$KeepWarm   # min-instances=1: use from the day you start rehearsing
 )
 
-$ErrorActionPreference = "Stop"
+# NOT "Stop". gcloud writes advisories to STDERR -- e.g.
+#   [environment: untagged] Read more to tag: g.co/cloud/project-env-tag.
+# and under "Stop" PowerShell promotes native stderr to a TERMINATING error the moment
+# the script's streams are redirected. So this:
+#     .\deploy\deploy.ps1 -ProjectId x *> deploy.log
+# died on line 2 -- on an informational notice -- while the identical interactive run
+# worked, and the log it left behind looked like a deploy that was merely slow. An
+# unattended deploy that dies quietly is worse than one that fails loudly.
+# Correctness here rests on explicit $LASTEXITCODE checks and `throw`, both of which
+# work regardless of this setting.
+$ErrorActionPreference = "Continue"
+$PSNativeCommandUseErrorActionPreference = $false   # PowerShell 7.3+; ignored on 5.1
 
 # Resolve gcloud explicitly. A detached process does not reliably inherit a User PATH
 # that was set in the current session, and the SDK here lives at a non-standard root.
@@ -44,12 +55,18 @@ Write-Host "==> Enabling APIs (idempotent)" -ForegroundColor Cyan
     aiplatform.googleapis.com `
     cloudbuild.googleapis.com `
     artifactregistry.googleapis.com
+if ($LASTEXITCODE -ne 0) {
+    throw "Enabling APIs failed (gcloud exit $LASTEXITCODE). Nothing was deployed."
+}
 
 # Firestore must exist before the app writes to it. Creating a database twice is an
 # error, not a no-op, so check first.
-$dbExists = $true
-try { & $gcloud firestore databases describe --database="(default)" 2>$null | Out-Null }
-catch { $dbExists = $false }
+# Check the exit code, not a catch block: native stderr only becomes a catchable
+# exception under some combinations of PowerShell version and stream redirection, so
+# try/catch here was quietly unreliable -- on a fresh project it could report the
+# database as existing and skip creating it.
+& $gcloud firestore databases describe --database="(default)" 2>$null | Out-Null
+$dbExists = ($LASTEXITCODE -eq 0)
 
 if (-not $dbExists) {
     Write-Host "==> Creating Firestore database (Native mode, $Region)" -ForegroundColor Cyan

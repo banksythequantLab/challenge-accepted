@@ -108,6 +108,10 @@
   .kind.blocker{background:#331416;color:#FF8A8A}
   .kind.build{background:#332708;color:#FFD27A}
   .kind.question,.kind.answer{background:#122540;color:#8FBBFF}
+  .partybar{display:flex;align-items:center;gap:10px;padding:10px 14px;
+            border-bottom:1px solid var(--line)}
+  .roster{font-size:11.5px;color:var(--dim);line-height:1.4;flex:1}
+  .roster b{color:var(--ink)}
   .facts{margin:0;padding:12px 16px 12px 30px}
   .facts li{margin:6px 0;font-size:12.5px;color:#C3CAD8}
 
@@ -210,6 +214,7 @@
         <div class="xpbar"><div class="xpfill" id="xp"></div></div>
       </div>
       <div class="stat"><b id="c-tools">0</b><span>tools forged</span></div>
+      <div class="stat"><b id="c-party">1</b><span>in party</span></div>
       <div class="stat"><b id="live">●</b><span>live</span></div>
     </div>
   </header>
@@ -248,7 +253,14 @@
 
     <div class="pane" id="p-quest"><div id="detail" class="empty">Pick a quest on the map.</div></div>
     <div class="pane" id="p-journal"><div id="journal"></div></div>
-    <div class="pane" id="p-facts"><ul class="facts" id="facts"></ul></div>
+    <div class="pane" id="p-facts">
+      <div class="partybar">
+        <div id="roster" class="roster">Just you so far.</div>
+        <button class="ghost" id="invite"
+                title="Copy a link that drops a teammate into this same quest">Invite ⧉</button>
+      </div>
+      <ul class="facts" id="facts"></ul>
+    </div>
   </aside>
 </div>
 
@@ -362,16 +374,34 @@ function appendText(node, text) {
   node.querySelector('.body').innerHTML = md(node._raw);
 }
 
+// POST /apps/{a}/users/{u}/sessions -- NOT .../sessions/{id}.
+//
+// The by-id endpoint is deprecated in ADK and, more to the point, it declares
+// `state: Optional[dict]` as a bare body parameter: the WHOLE BODY is the state. We
+// were posting {state:{...}} to it, which FastAPI happily accepted and stored as a
+// session whose state was literally {"state": {...}}. Nothing errored. Every read of
+// tool_context.state["challenge_id"] and ["user_id"] then quietly missed, so:
+//   * every challenge created from this dashboard was owned by "anon" in "grp_anon",
+//   * a teammate opening an invite link resolved to their own private group,
+//   * the Warden never learned a challenge was already in flight and re-interviewed
+//     people about a goal that was drawn on the screen behind the chat panel.
+// Three separate mysteries, one silently-accepted request shape.
+//
+// The plural endpoint takes CreateSessionRequest{session_id, state, events}, so the
+// wrapping is explicit and a mismatch is a validation error rather than a shrug.
 async function ensureSession(force) {
   if (sessionId && !force) return sessionId;
-  sessionId = 's_' + Math.random().toString(36).slice(2, 10);
+  const wanted = 's_' + Math.random().toString(36).slice(2, 10);
   const state = { user_id: userId, group_id: groupId };
   if (challengeId) state.challenge_id = challengeId;
-  const r = await fetch(`/apps/${APP_NAME}/users/${userId}/sessions/${sessionId}`, {
+  const r = await fetch(`/apps/${APP_NAME}/users/${userId}/sessions`, {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ state }),
+    body: JSON.stringify({ session_id: wanted, state }),
   });
   if (!r.ok) throw new Error('session create failed: ' + r.status);
+  // Trust the server's id rather than assuming it honoured ours.
+  const created = await r.json();
+  sessionId = created.id || wanted;
   return sessionId;
 }
 
@@ -809,9 +839,49 @@ async function pickChallenge() {
   return challenges.length > 0;
 }
 
+//: The roster is the only proof a teammate actually arrived. Facts alone are not
+//: enough -- someone can be reading the quest for ten minutes before they discover
+//: anything, and until they do the app would look single-player.
+function drawParty(members) {
+  const others = members.filter(m => m !== userId);
+  // You may not be on the roster yet -- membership is recorded the first time you
+  // actually talk to the agents, not merely for opening the page. Count yourself
+  // either way, so the badge and the sentence never disagree.
+  const total = others.length + 1;
+  $('c-party').textContent = total;
+  $('roster').innerHTML = others.length
+    ? `<b>${total}</b> on this quest — you and ${
+        others.map(m => `<b>${esc(m)}</b>`).join(', ')}.`
+    : 'Just you so far. Hit Invite and send someone the link.';
+}
+
+//: An invite is a link to this exact challenge. The teammate keeps their own user id
+//: but the server files their work under the challenge's group, so their discoveries
+//: land in everyone's Party Knowledge. See _group_id() in services/tools.py.
+$('invite').onclick = e => {
+  if (!challengeId) return copyText('', e.target);
+  copyText(location.origin + location.pathname + '?id=' + challengeId, e.target);
+};
+
+//: Announce yourself once per challenge. Without this the roster only updated when the
+//: model happened to call a tool, so a teammate could sit reading the quest for five
+//: minutes while both screens still said "1 in party".
+let joined = null;
+async function joinParty() {
+  if (!challengeId || joined === challengeId) return;
+  joined = challengeId;
+  try {
+    await api(`/challenges/${challengeId}/join`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ user_id: userId }),
+    });
+  } catch (e) { joined = null; console.error(e); }
+}
+
 async function refresh() {
   try {
     await pickChallenge();
+    await joinParty();
     if (!challengeId) {
       drawGraph({ nodes: [], edges: [] });
       $('title').className = 'empty';
@@ -836,6 +906,7 @@ async function refresh() {
     $('c-tools').textContent = s.counts.tools;
     $('xp').style.width = (s.counts.nodes
       ? Math.round(100 * s.counts.done / s.counts.nodes) : 0) + '%';
+    drawParty(s.party || []);
     $('facts').innerHTML = s.group_facts.length
       ? s.group_facts.map(f => `<li>${esc(f)}</li>`).join('')
       : '<li style="color:var(--faint)">Nothing learned yet. Discoveries land here for the whole party.</li>';

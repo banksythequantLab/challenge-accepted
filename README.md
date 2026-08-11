@@ -88,19 +88,29 @@ that is expected, and `store` reports `memory` so you can tell.
 
 ### Verify it end to end
 
-These drive the real thing rather than mocking it. The first two cost a few cents of
+These drive the real thing rather than mocking it. The first three cost a few cents of
 Gemini usage; the rest are free.
 
 ```powershell
 python scripts\drive_chat.py            # types 4 interview turns into the real chat box
                                         # in a headless browser; fails unless the agents
                                         # reply AND a challenge_id reaches the UI
+python scripts\check_party.py           # TWO browser contexts: one user invites, the
+                                        # other joins and discovers something, and the
+                                        # first screen must pick it up on its own poll
 python scripts\check_session_recovery.py  # deletes the session mid-conversation and
                                         # proves the page recovers without a reload
+python scripts\check_tools.py           # opens all five tool types and asserts the
+                                        # right renderer fired; runs the mini-app
 python scripts\check_copy.py            # clicks every copy button and reads the
                                         # clipboard back, desktop and iPhone viewport
 python scripts\shoot_ui.py              # seeds demo data, screenshots the dashboard
 ```
+
+`check_party.py` is the one that earns its keep. Three separate bugs — a silently
+reshaped session payload, a group id resolved from the wrong place, and an agent
+claiming a write it had no tool to perform — were all invisible to the unit tests and
+to a single browser. Two browsers found them in one run.
 
 `drive_chat.py` also takes a URL, so it can drive a deployment:
 
@@ -247,6 +257,85 @@ now detects a session the server has never heard of, rebuilds it, and retries th
 once — no reload, no lost conversation. `scripts\check_session_recovery.py` proves it by
 deleting the session out from under a live page and requiring the next turn to succeed.
 
+### Fixed: the browser posted session state to an endpoint that silently reshaped it
+
+This one hid three separate "mysteries" behind a request that returned `200 OK`.
+
+The dashboard created its ADK session with
+
+```js
+POST /apps/{app}/users/{u}/sessions/{sessionId}   { "state": { user_id, group_id, challenge_id } }
+```
+
+That endpoint is deprecated in ADK, and it declares `state: Optional[dict[str, Any]]` as
+a **bare body parameter** — the whole body *is* the state. So the session was created
+with state literally equal to `{"state": {...}}`, one level too deep. FastAPI validated
+it. Nothing logged. Every later read of `tool_context.state["challenge_id"]` and
+`["user_id"]` simply missed.
+
+Downstream, that produced:
+
+* **Every challenge created from the dashboard was owned by `anon` in group `grp_anon`.**
+  `save_charter` falls back to `state.get("user_id", "anon")`. Group memory was
+  effectively one global bucket.
+* **A teammate opening an invite link resolved to their own private group.** Their
+  discoveries were filed where nobody would read them.
+* **Warden re-interviewed people about a goal already drawn on screen**, because the
+  in-flight check reads `challenge_id` from state and never found one.
+
+Fixed by posting to the supported plural endpoint, which takes a typed
+`CreateSessionRequest{session_id, state, events}` — so the wrapping is explicit and a
+mismatch is a validation error instead of a shrug.
+
+The lesson is not "read the docs." It is that a request which cannot fail is a request
+that cannot tell you anything, and the only thing that caught this was driving two real
+browsers and refusing to accept an agent's word that it had saved something.
+
+### Fixed: a teammate could see the party, but never join it
+
+Group facts *read* correctly for anyone opening `?id=<challenge>` — `/api/challenges/{id}`
+resolves the group from the challenge document. Writes did not: `_group_id()` trusted
+session state, which carries a `grp_<user_id>` the browser minted from its own
+`localStorage`. `_group_id()` now resolves through the challenge whenever one is in
+scope, and only falls back to state before a charter exists.
+
+Party membership is now a deterministic `POST /api/challenges/{id}/join` the browser
+makes on load, **not** something inferred from a model deciding to call a tool. The
+first version relied on the latter, so a teammate could read a quest for five minutes
+while both screens still said "1 in party". The header shows the roster, and the Party
+tab has an **Invite** button that copies the exact link.
+
+`scripts\check_party.py` drives the whole beat through two separate browser *contexts*
+(not tabs — tabs share `localStorage` and would let a broken build pass): Derek opens
+the quest, copies the invite, Dana joins in a fresh context, tells the agents something
+new, and Derek's screen picks it up on its own poll.
+
+### Fixed: Warden claimed to save a group fact it had no tool to save
+
+With routing fixed, Warden answered a teammate with *"I've recorded that into our shared
+group memory so everyone inherits it."* Nothing was written — `remember_group_fact` was
+on Archivist and Coach, not on Warden. It was a sentence the model made up because the
+sentence was the obviously right thing to say.
+
+Warden now holds the tool. An agent that can *claim* a thing must be able to *do* the
+thing; the alternative is a product whose central promise is a hallucination. The check
+script now prints the tool calls the UI recorded next to what the agent said, which is
+what separates "the tool never fired" from "the tool fired and the write was dropped".
+
+### Fixed: a redirected deploy died on line 2 and looked like it was still running
+
+`deploy\deploy.ps1` set `$ErrorActionPreference = "Stop"`. gcloud writes advisories to
+stderr (`[environment: untagged] Read more to tag: ...`), and under `Stop` PowerShell
+promotes native stderr to a **terminating** error as soon as the script's streams are
+redirected. Run interactively it worked; run as `.\deploy\deploy.ps1 ... *> deploy.log`
+it died on an informational notice and left a two-line log that read exactly like a
+deploy that was merely slow.
+
+Now `Continue`, with correctness resting on explicit `$LASTEXITCODE` checks. The
+Firestore existence probe was rewritten the same way — it used `try/catch`, which only
+catches when stderr happens to be converted, so on a fresh project it could report the
+database as existing and skip creating it.
+
 ### Fixed: a joining teammate got interviewed instead of onboarded
 
 Dana opened a challenge Derek had already planned. Warden delegated her to the
@@ -266,6 +355,14 @@ enabled and nobody on the team has admin access, so we're using Render and Verce
 
 Worth remembering: the first instinct was to reword the prompt. The prompt was fine.
 The data it needed did not exist.
+
+**And the rule did not hold.** Proven by script, that fix looked complete. Driven
+through two real browsers it failed immediately — partly because of the session-state
+bug above, but also because a rule sitting eighth in a list of eight competes with the
+other seven and loses. Warden's instruction is now an ADK `InstructionProvider`: when
+state carries a planned challenge, the prompt is rebuilt each turn with the actual
+title, outcome and progress, stated as fact rather than policy. Rules argue. Facts
+don't. See `warden_instruction()` in `challenge_accepted/agent.py`.
 
 ### Fixed: CLIMB deadlocked, then dropped feedback, then duplicated everything
 

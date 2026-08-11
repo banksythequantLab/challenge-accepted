@@ -19,7 +19,10 @@ python main.py                     # http://localhost:8080/app
 
 - **Two browser windows**, side by side, as two different users. There is no sign-in --
   identity is an anonymous id in `localStorage` -- so use **one normal window and one
-  incognito window**, or two browser profiles. Same challenge id in both URLs.
+  incognito window**, or two browser profiles. Do NOT use two tabs — they share
+  `localStorage`, so both would be the same user and the party would never reach 2.
+  Get the second window's URL from the **Invite** button rather than typing it; that is
+  the path a real teammate takes, and it is the one that is tested.
 - **min-instances=1** on Cloud Run if demoing the deployed URL. A cold start is several
   seconds of dead air.
 - **Pre-run the challenge once** so the tools already exist. Then re-run the FORGE beat
@@ -39,7 +42,7 @@ python main.py                     # http://localhost:8080/app
 | **0:20–0:50** | Type a real goal into the app | "I tell it what I actually want." Then let the **Interviewer** ask. Pause on a genuinely good question — *"What specific end state would prove to a judge that this launched?"* Say: "It doesn't guess. It asks until the goal is checkable." |
 | **0:50–1:20** | Goal Graph draws itself; Journal filling on the right | "Not a to-do list — a dependency graph. Three of these can start today; the rest are blocked. And on the right, the agents are **taking notes** the whole time. That's not a log, it's the product." |
 | **1:20–2:20** | **THE MONEY SHOT.** Quartermaster → Toolwright | "Now the part nothing else does. For each step it asks: *what tool would make this trivial?*" Show a ToolSpec appear. Show code being written and **executed**. Show the smoke test pass. **Open the tool and use it.** "It wrote that, ran it, tested it, and attached it to the step. Four of those built in parallel." |
-| **2:20–2:50** | Second window — Dana joins | "My teammate opens the same challenge." Read her Coach's actual opening line aloud: *"Heads up — Derek found Cloud Run requires billing enabled and nobody on the team has admin, so we're using Vercel instead."* Then: "Nobody told her that. She inherited it." |
+| **2:20–2:50** | Party tab → **Invite** → paste into the incognito window | "Two of us are on this." Click **Invite**, paste the link in the second window. The header goes **1 → 2 in party** on *your* screen, without you touching it. Then have Dana type a discovery — *"the repo has to be public at submission, not just shared with judges"* — and **cut back to your own screen**: it is sitting in your Party Knowledge. "Nobody told me that. I inherited it." |
 | **2:50–3:05** | Thumbs down on a tool + reason | "And when something isn't useful, I say so —" click 👎, type a reason "— and the next generation is different. The brief asks for an agent that *adapts to how you think*. This is that, wired to real state." |
 | **3:05–3:20** | Click **Copy for Claude** on a quest, paste into Claude | "The work doesn't end in my app. One click copies the step, the goal it serves, and the source of the tool it built — straight into whatever I'm already using." Paste it. Let the paste land on screen. |
 | **3:20–3:35** | Architecture diagram, then Cloud Console | "Nine agents on Google ADK and Gemini 3.6 Flash, deployed on Cloud Run with Firestore as the shared source of truth." Show the Cloud Run console with the service running. Show `/api/healthz` reading `"store":"firestore"`. |

@@ -31,6 +31,10 @@ STATUS_COLOR = {
 }
 
 
+class JoinIn(BaseModel):
+    user_id: str = Field(description="Anonymous id the browser keeps in localStorage")
+
+
 class FeedbackIn(BaseModel):
     target_type: str = Field(description="node | tool | question | graph")
     target_id: str
@@ -131,7 +135,29 @@ def get_challenge(challenge_id: str) -> dict[str, Any]:
             "tools": len(store.list_tools(challenge_id)),
         },
         "group_facts": group.get("shared_facts", []),
+        # Who else is on this. The UI shows the count so a second browser joining is
+        # visible without waiting for that teammate to discover something.
+        "party": group.get("members", []),
     }
+
+
+@router.post("/challenges/{challenge_id}/join")
+def join_challenge(challenge_id: str, body: JoinIn) -> dict[str, Any]:
+    """Put the caller on this challenge's party roster.
+
+    Joining is a UI act, not an agent decision. The first version relied on the model
+    calling a tool that happened to resolve the group -- so a teammate who opened the
+    invite link and read for five minutes was invisible to everyone else, and if the
+    model chose not to call a tool at all they were never on the roster. A judge
+    watching two browsers would have seen "1 in party" on both. Deterministic beats
+    clever: the browser says who it is on load, and the roster is right immediately.
+    """
+    challenge = _challenge_or_404(challenge_id)
+    group_id = str(challenge.get("group_id") or "")
+    if not group_id:
+        raise HTTPException(status_code=409, detail="Challenge has no group")
+    members = store.join_group(group_id, body.user_id)
+    return {"status": "ok", "group_id": group_id, "party": members}
 
 
 @router.get("/challenges/{challenge_id}/graph")

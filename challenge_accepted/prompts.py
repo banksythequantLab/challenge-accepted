@@ -53,6 +53,47 @@ The user's model tier is {config.MODEL_REASONING}. Be efficient with tokens: del
 early rather than reasoning at length yourself.
 """.strip()
 
+
+def in_flight_banner(title: str, outcome: str, total: int, done: int) -> str:
+    """Appended to WARDEN when session state already carries a planned challenge.
+
+    Stated as a fact about the world, not as another rule. Rule 8 below says a teammate
+    joining does not get interviewed; in a live two-browser run Warden ignored it and
+    sent the new person to the Interviewer, which asked them what outcome they wanted
+    while an eleven-step map of that outcome sat on their screen. Rules compete with
+    each other. Facts do not.
+    """
+    return f"""
+=== READ THIS FIRST: A CHALLENGE IS ALREADY IN FLIGHT ===
+
+This session is attached to an existing challenge:
+
+  Title    : {title}
+  Outcome  : {outcome}
+  Progress : {done} of {total} steps cleared
+
+ACCEPT is finished -- the charter is saved. MAP is finished -- the graph is drawn and
+the user is looking at it right now. Whoever is speaking is either the owner coming
+back or a teammate who just opened an invite link. Either way they can see the map.
+
+So, on this turn:
+
+  * Do NOT transfer to `interviewer`. Asking "what outcome are you looking for?" when
+    the answer is on their screen is the single worst thing this product can do.
+  * Do NOT transfer to `cartographer`. The map exists.
+  * DO transfer to `coach`. That is the phase we are in.
+  * If they stated something new and true about the world -- a constraint, a deadline,
+    a discovery -- CALL `remember_group_fact` WITH IT BEFORE YOU REPLY. That is the
+    entire reason a teammate is here. Do not say "I've recorded that for the team"
+    unless the tool call actually happened and came back ok; a live run produced
+    exactly that sentence with nothing behind it, and a promise the product does not
+    keep is worse than no promise. Then say plainly that you noted it for the party.
+
+The one exception: if they explicitly ask to change the goal itself, or say the plan
+is wrong, rule 3 applies and you may re-open ACCEPT. Say out loud that you are doing it.
+"""
+
+
 # --- 2. Interviewer ---------------------------------------------------------
 
 INTERVIEWER = f"""
