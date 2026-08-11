@@ -53,16 +53,23 @@ def serve() -> None:
 
 
 def main() -> None:
-    # A leftover server from a previous run would silently answer instead of this
-    # one, and you would be testing stale state. Refuse rather than mislead.
-    import socket
+    # Pass a URL to drive a deployed service instead of booting one locally:
+    #   python scripts\drive_chat.py https://challenge-accepted-....run.app
+    remote = sys.argv[1].rstrip("/") if len(sys.argv) > 1 else None
+    base = remote or f"http://127.0.0.1:{PORT}"
 
-    with socket.socket() as s:
-        if s.connect_ex(("127.0.0.1", PORT)) == 0:
-            sys.exit(f"FAIL: something is already listening on {PORT}. Kill it first.")
+    if not remote:
+        # A leftover server from a previous run would silently answer instead of
+        # this one, and you would be testing stale state. Refuse rather than mislead.
+        import socket
 
-    threading.Thread(target=serve, daemon=True).start()
-    time.sleep(3.0)
+        with socket.socket() as s:
+            if s.connect_ex(("127.0.0.1", PORT)) == 0:
+                sys.exit(f"FAIL: something is already listening on {PORT}. Kill it first.")
+
+        threading.Thread(target=serve, daemon=True).start()
+        time.sleep(3.0)
+    _p(f"driving {base}/app")
 
     from playwright.sync_api import sync_playwright
 
@@ -74,7 +81,7 @@ def main() -> None:
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
 
-        page.goto(f"http://127.0.0.1:{PORT}/app", wait_until="networkidle")
+        page.goto(f"{base}/app", wait_until="networkidle")
         page.wait_for_timeout(1200)
 
         for turn in TURNS:
