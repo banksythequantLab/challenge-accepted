@@ -492,6 +492,7 @@ async function adoptChallengeFromSession() {
     const cid = s?.state?.challenge_id;
     if (cid && cid !== challengeId) {
       challengeId = cid; lastJournal = -1;
+      rememberChallenge(cid);
       history.replaceState(null, '', '?id=' + cid);
     }
   } catch {}
@@ -823,6 +824,15 @@ function drawJournal(entries) {
   if (stick) el.scrollTop = el.scrollHeight;
 }
 
+function rememberChallenge(cid) { localStorage.setItem('ca_last', cid); }
+
+// Which quest this browser lands on with a bare /app.
+//
+// It used to be challenges[0] -- the newest in the store. On a laptop that is a
+// convenience. On a public URL with judges on it, it means the second person to open
+// the link is dropped into the first person's quest, reading someone else's goal
+// before they have typed anything. Land on the last quest THIS browser was on, and
+// otherwise on a clean slate. The picker still lists everything.
 async function pickChallenge() {
   const { challenges } = await api('/challenges');
   const p = $('picker');
@@ -830,11 +840,18 @@ async function pickChallenge() {
     `<option value="${esc(c.id)}">${esc(c.title)}</option>`).join('')
     || '<option value="">— no quests yet —</option>';
   p.style.display = challenges.length ? '' : 'none';
-  if (challenges.length && (!challengeId || !challenges.some(c => c.id === challengeId)))
-    challengeId = challenges[0].id;
-  if (challengeId) p.value = challengeId;
+
+  const known = id => id && challenges.some(c => c.id === id);
+  if (!known(challengeId)) challengeId = null;
+  if (!challengeId && known(localStorage.getItem('ca_last')))
+    challengeId = localStorage.getItem('ca_last');
+
+  if (challengeId) { p.value = challengeId; rememberChallenge(challengeId); }
+  else p.selectedIndex = -1;
+
   p.onchange = () => { challengeId = p.value; selected = null; lastJournal = -1;
-                       sessionId = null; history.replaceState(null,'','?id='+challengeId);
+                       sessionId = null; rememberChallenge(challengeId);
+                       history.replaceState(null,'','?id='+challengeId);
                        refresh(); };
   return challenges.length > 0;
 }

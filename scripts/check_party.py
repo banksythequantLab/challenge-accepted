@@ -41,7 +41,7 @@ import uvicorn  # noqa: E402
 from main import app  # noqa: E402
 from seed_demo import main as seed  # noqa: E402
 
-PORT = 8141
+PORT = 8142   # not 8141; check_copy.py uses that one
 
 #: Phrased the way a teammate actually would, and deliberately a fact rather than a
 #: question -- the point is that the agents file it for the party, not answer it.

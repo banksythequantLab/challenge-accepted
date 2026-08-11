@@ -53,7 +53,7 @@ def main() -> None:
         if s.connect_ex(("127.0.0.1", PORT)) == 0:
             sys.exit(f"FAIL: something is already listening on {PORT}. Kill it first.")
 
-    seed()
+    cid = seed()
     threading.Thread(target=serve, daemon=True).start()
     time.sleep(2.0)
 
@@ -77,7 +77,11 @@ def main() -> None:
         page.on("console", lambda m: errors.append(m.text) if m.type == "error" else None)
         page.on("pageerror", lambda e: errors.append(str(e)))
 
-        page.goto(f"http://127.0.0.1:{PORT}/app", wait_until="networkidle")
+        # Name the challenge explicitly. A bare /app no longer auto-selects the newest
+        # quest in the store -- on a shared URL that dropped the second visitor into the
+        # first visitor's goal -- so a probe that relied on that was testing a default
+        # that should never have existed.
+        page.goto(f"http://127.0.0.1:{PORT}/app?id={cid}", wait_until="networkidle")
         page.wait_for_timeout(1500)
 
         read = lambda: page.evaluate("() => navigator.clipboard.readText()")
@@ -127,7 +131,7 @@ def main() -> None:
         phone.grant_permissions(["clipboard-read", "clipboard-write"])
         pp = phone.new_page()
         pp.on("pageerror", lambda e: errors.append("phone: " + str(e)))
-        pp.goto(f"http://127.0.0.1:{PORT}/app", wait_until="networkidle")
+        pp.goto(f"http://127.0.0.1:{PORT}/app?id={cid}", wait_until="networkidle")
         pp.wait_for_timeout(1500)
         opacity = pp.eval_on_selector(
             "#chatlog .msg.bot .copy", "e => getComputedStyle(e).opacity")
