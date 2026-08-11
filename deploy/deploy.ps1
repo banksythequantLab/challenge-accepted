@@ -12,6 +12,12 @@ param(
     [string]$Service = "challenge-accepted",
     [string]$ModelReasoning = "gemini-3.6-flash",
     [string]$ModelCheap = "gemini-3.5-flash-lite",
+    # MUST be "global", not the Cloud Run region. Deploying with us-central1 produced:
+    #   404 NOT_FOUND: Publisher model .../locations/us-central1/publishers/google/
+    #   models/gemini-3.6-flash was not found or your project does not have access
+    # The 3.x Gemini models are served from the global endpoint on Vertex AI. The
+    # service still RUNS in $Region; this only sets where the genai client looks.
+    [string]$ModelLocation = "global",
     [switch]$KeepWarm   # min-instances=1: use from the day you start rehearsing
 )
 
@@ -60,7 +66,7 @@ if ($KeepWarm) {
 $envVars = @(
     "GOOGLE_GENAI_USE_VERTEXAI=TRUE",
     "GOOGLE_CLOUD_PROJECT=$ProjectId",
-    "GOOGLE_CLOUD_LOCATION=$Region",
+    "GOOGLE_CLOUD_LOCATION=$ModelLocation",
     "CA_MODEL_REASONING=$ModelReasoning",
     "CA_MODEL_CHEAP=$ModelCheap"
 ) -join ","
