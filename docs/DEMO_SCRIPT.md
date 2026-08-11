@@ -17,15 +17,17 @@ python scripts\seed_demo.py        # instant populated graph, no API cost
 python main.py                     # http://localhost:8080/app
 ```
 
-- **Two browser windows**, side by side, both signed in as different users. Window A =
-  Derek, window B = Dana.
+- **Two browser windows**, side by side, as two different users. There is no sign-in --
+  identity is an anonymous id in `localStorage` -- so use **one normal window and one
+  incognito window**, or two browser profiles. Same challenge id in both URLs.
 - **min-instances=1** on Cloud Run if demoing the deployed URL. A cold start is several
   seconds of dead air.
 - **Pre-run the challenge once** so the tools already exist. Then re-run the FORGE beat
   live for the camera. If a live build fails on camera you have the seeded version to
   cut to — that's why `seed_demo.py` exists.
 - Close Slack, email, notifications. Full screen. 1600×900 or larger.
-- Have `/healthz` open in a tab showing `"store":"firestore"`.
+- Have `/api/healthz` open in a tab showing `"store":"firestore"` -- the rules require
+  **visual proof of Google Cloud deployment**, and this plus the Cloud Run console is it.
 
 ---
 
@@ -38,9 +40,19 @@ python main.py                     # http://localhost:8080/app
 | **0:50–1:20** | Goal Graph draws itself; Journal filling on the right | "Not a to-do list — a dependency graph. Three of these can start today; the rest are blocked. And on the right, the agents are **taking notes** the whole time. That's not a log, it's the product." |
 | **1:20–2:20** | **THE MONEY SHOT.** Quartermaster → Toolwright | "Now the part nothing else does. For each step it asks: *what tool would make this trivial?*" Show a ToolSpec appear. Show code being written and **executed**. Show the smoke test pass. **Open the tool and use it.** "It wrote that, ran it, tested it, and attached it to the step. Four of those built in parallel." |
 | **2:20–2:50** | Second window — Dana joins | "My teammate opens the same challenge." Read her Coach's actual opening line aloud: *"Heads up — Derek found Cloud Run requires billing enabled and nobody on the team has admin, so we're using Vercel instead."* Then: "Nobody told her that. She inherited it." |
-| **2:50–3:15** | Thumbs down on a tool + reason | "And when something isn't useful, I say so —" click 👎, type a reason "— and the next generation is different. The brief asks for an agent that *adapts to how you think*. This is that, wired to real state." |
-| **3:15–3:35** | Architecture diagram, then Cloud Console | "Nine agents on Google ADK and Gemini 3.6 Flash. Cloud Run, Firestore, Vertex AI Memory Bank." Show the console with the service running. Show `/healthz`. |
-| **3:35–3:45** | Business model card + live URL | "Nineteen dollars solo, twenty-nine a seat for teams. Measured cost is about 86 cents a challenge. It's live at challengeaccepted.app." |
+| **2:50–3:05** | Thumbs down on a tool + reason | "And when something isn't useful, I say so —" click 👎, type a reason "— and the next generation is different. The brief asks for an agent that *adapts to how you think*. This is that, wired to real state." |
+| **3:05–3:20** | Click **Copy for Claude** on a quest, paste into Claude | "The work doesn't end in my app. One click copies the step, the goal it serves, and the source of the tool it built — straight into whatever I'm already using." Paste it. Let the paste land on screen. |
+| **3:20–3:35** | Architecture diagram, then Cloud Console | "Nine agents on Google ADK and Gemini 3.6 Flash, deployed on Cloud Run with Firestore as the shared source of truth." Show the Cloud Run console with the service running. Show `/api/healthz` reading `"store":"firestore"`. |
+| **3:35–3:45** | Business model card + live URL | "Nineteen dollars solo, twenty-nine a seat for teams. Measured cost is about 86 cents a challenge." Show the live Cloud Run URL on screen. |
+
+> **Say "Vertex AI Memory Bank" nowhere.** It is not wired — `use_vertex()` is false and
+> the architecture diagram marks it *NOT WIRED — PLANNED*. Claiming it on camera is the
+> one thing that could turn an honest submission into a dishonest one. "Firestore as the
+> shared source of truth" is both true and the better line anyway.
+
+> **Say "challengeaccepted.app" only if you have actually mapped the domain** by
+> recording day. Otherwise read out the Cloud Run URL. Do not point judges at a domain
+> that 404s.
 
 ---
 

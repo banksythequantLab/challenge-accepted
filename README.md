@@ -15,19 +15,28 @@ Built for the [All Things Agentic hackathon](https://allthingsagentichackathon.d
 
 ## Status
 
-**v0.2 -- full ACCEPT -> MAP -> FORGE pipeline verified against live Gemini.**
+**v0.4 -- deployed, and driven end to end from the browser.**
+
+**Live:** https://challenge-accepted-xk3m7ygefa-uc.a.run.app/app
+(dashboard) · [`/`](https://challenge-accepted-xk3m7ygefa-uc.a.run.app/) (ADK dev UI) ·
+[`/api/healthz`](https://challenge-accepted-xk3m7ygefa-uc.a.run.app/api/healthz)
 
 | | |
 |---|---|
 | Verified live | 8-turn interview -> charter saved -> 12-node DAG -> 6 tools built, smoke-tested and persisted |
 | Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
-| Verified | 29 tests pass against a real ADK `Runner`; FastAPI boots, `/healthz` 200 |
+| Verified | 52 tests pass against a real ADK `Runner`; FastAPI boots, `/api/healthz` 200 |
 | Measured | One full challenge (12 nodes, 6 tools) = **243k prompt / 66k billed output, ~$0.86**. Break-even at $29/seat ≈ **34 challenges/user/month** |
 | Fixed | The "exactly 4 tools" ceiling. Two causes, both live-only. See Known issues. |
 | Verified live | CLIMB end to end: node closed on evidence, feedback captured with reason, blocker -> group fact -> interview re-opened -> graph redrawn around the constraint |
 | Verified live | **Two users, one challenge.** Dana joins a session Derek started; her Coach opens with *"Derek found Cloud Run requires billing... so we're using Render and Vercel instead"* and hands her a ready node. This is the demo beat |
 | Not verified | That a joining teammate is never offered an already-`done` node. The check exists but was vacuous -- Derek hit a blocker rather than completing anything in that script |
-| Not built | Next.js front end, React Flow graph, Firebase Auth, Cloud Run deploy |
+| Verified live | **Deployed to Cloud Run**, Firestore-backed (`store=firestore`), agents served from Vertex AI. Gemini 3.x lives on the Vertex **global** endpoint, not a regional one |
+| Verified live | The dashboard **drives** the agents: chat panel opens an ADK session, streams `/run_sse`, and renders text, tool calls and code execution as they happen. One scripted browser run: 15 quest nodes drawn, 4 tools forged, title auto-filled, zero console errors |
+| Verified | Losing the session mid-conversation (deleted server-side, exactly as a Cloud Run restart does) recovers without a reload -- `scripts\check_session_recovery.py` |
+| Verified | Every copy-to-clipboard path returns the right markdown, on desktop and on an iPhone 13 viewport -- `scripts\check_copy.py` reads the clipboard back and asserts on content |
+| Not built | Vertex AI Memory Bank and Agent Engine Sessions. `use_vertex()` is false; sessions are per-instance and in memory. See Known issues |
+| Not built | Firebase Auth. Users are anonymous ids in `localStorage` |
 
 Reproduce with `python scripts\live_walk.py` (costs ~$0.86, prints full token accounting).
 
@@ -40,22 +49,117 @@ Run `pytest` to see exactly what is and isn't covered.
 
 ---
 
-## Quick start
+## Run it locally
+
+Python 3.11+. No build step -- the dashboard is a single static file.
 
 ```powershell
+git clone https://github.com/banksythequantLab/challenge-accepted
+cd challenge-accepted
+
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\activate                 # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 
-copy .env.example .env      # add GOOGLE_API_KEY from aistudio.google.com
-pytest                      # 10 tests, no API key needed
-
-adk web                     # dev UI at http://localhost:8000
-python main.py              # or FastAPI on :8080, health at /healthz
+pytest                                 # 52 tests, no API key needed
 ```
 
-With no `GOOGLE_CLOUD_PROJECT` set, the store falls back to an in-process dict, so
-everything runs locally with zero GCP setup.
+To talk to the agents you need one key. Get a free one at
+[aistudio.google.com](https://aistudio.google.com/apikey):
+
+```powershell
+copy .env.example .env                 # macOS/Linux: cp .env.example .env
+# edit .env and set GOOGLE_API_KEY=...
+
+python main.py
+```
+
+Then open:
+
+| | |
+|---|---|
+| http://localhost:8080/app | the dashboard -- talk to the agents, watch the quest map |
+| http://localhost:8080/ | ADK's dev UI, useful for inspecting raw agent events |
+| http://localhost:8080/api/healthz | `{"ok":true,"store":"memory",...}` |
+
+With no `GOOGLE_CLOUD_PROJECT` set the store falls back to an in-process dict, so
+everything runs with zero GCP setup. Nothing persists between restarts in that mode --
+that is expected, and `store` reports `memory` so you can tell.
+
+### Verify it end to end
+
+These drive the real thing rather than mocking it. The first two cost a few cents of
+Gemini usage; the rest are free.
+
+```powershell
+python scripts\drive_chat.py            # types 4 interview turns into the real chat box
+                                        # in a headless browser; fails unless the agents
+                                        # reply AND a challenge_id reaches the UI
+python scripts\check_session_recovery.py  # deletes the session mid-conversation and
+                                        # proves the page recovers without a reload
+python scripts\check_copy.py            # clicks every copy button and reads the
+                                        # clipboard back, desktop and iPhone viewport
+python scripts\shoot_ui.py              # seeds demo data, screenshots the dashboard
+```
+
+`drive_chat.py` also takes a URL, so it can drive a deployment:
+
+```powershell
+python scripts\drive_chat.py https://challenge-accepted-xk3m7ygefa-uc.a.run.app
+```
+
+---
+
+## Deploy it
+
+Needs the [gcloud CLI](https://cloud.google.com/sdk/docs/install) and a GCP project
+with billing enabled.
+
+```powershell
+gcloud auth login --no-launch-browser
+gcloud config set project YOUR_PROJECT_ID
+
+.\deploy\deploy.ps1 -ProjectId YOUR_PROJECT_ID -KeepWarm
+```
+
+The script enables the required APIs, creates the Firestore database if missing, builds
+with Cloud Build, and deploys to Cloud Run with `GOOGLE_CLOUD_LOCATION=global`.
+`-KeepWarm` sets `min-instances=1` so a cold start does not eat a live demo.
+
+**It does not grant IAM.** Since Google's 2024 change to the default compute service
+account, a fresh project needs these before the first build will succeed. Run them once:
+
+```powershell
+$PROJECT = "YOUR_PROJECT_ID"
+$NUM = gcloud projects describe $PROJECT --format="value(projectNumber)"
+$SA = "$NUM-compute@developer.gserviceaccount.com"
+
+foreach ($role in @("roles/cloudbuild.builds.builder","roles/storage.objectViewer",
+                    "roles/logging.logWriter","roles/artifactregistry.writer",
+                    "roles/datastore.user","roles/aiplatform.user")) {
+  gcloud projects add-iam-policy-binding $PROJECT --member="serviceAccount:$SA" --role=$role
+}
+```
+
+Without `datastore.user` the app starts but falls back to the in-memory store; without
+`aiplatform.user` the agents 403 on the first turn.
+
+Then confirm the store actually switched -- a silent fallback to `memory` means no
+persistence and each instance holding its own private dict:
+
+```powershell
+curl https://YOUR-SERVICE-URL/api/healthz     # expect  "store":"firestore"
+.\deploy\smoke_live.ps1                       # creates a session and takes one real turn
+```
+
+Two things that will bite you, both learned the hard way:
+
+- **Gemini 3.x is served from the Vertex `global` endpoint**, not a regional one. A
+  regional `-ModelLocation` gives `404 NOT_FOUND: Publisher model`. The script defaults
+  to `global`.
+- **PowerShell does not throw on a non-zero exit from a native executable.** An earlier
+  version of the deploy script cheerfully printed `==> Deployed` over a failed build.
+  It now checks `$LASTEXITCODE` after every `gcloud` call.
 
 ---
 
@@ -72,10 +176,17 @@ warden  (coordinator, gemini-3.6-flash)
 |       +-- forge_workers   Parallel
 |           +-- toolwright_0..3                build + smoke-test, concurrently
 +-- coach           mode=task          CLIMB   one node at a time
-+-- referee         mode=task          CLIMB   evidence check + feedback capture
+|   +-- referee     AgentTool          CLIMB   evidence check + feedback capture
 +-- archivist       mode=single_turn   --      takes the notes (cross-cutting)
 +-- scout           AgentTool                  grounded search, on demand
+
+browser  ->  /run_sse  (SSE stream of every agent event)
+         ->  /api/*    (read-only: graph, journal, tools, group facts, feedback)
+         ->  Firestore (the shared data source both sides hit)
 ```
+
+The Referee hangs off the Coach as an `AgentTool`, not as a sibling. As a sibling it
+caused an infinite delegation loop in a live run -- see Known issues.
 
 ### Design decisions worth defending
 
@@ -114,6 +225,27 @@ checklist rather than blocking the graph.
 ---
 
 ## Known issues
+
+### Memory Bank and Agent Engine Sessions are not wired, and the diagram now says so
+
+`main.py` switches both the session service and the memory service to
+`agentengine://{AGENT_ENGINE_ID}` the moment `use_vertex()` is true. No Agent Engine has
+been created, so today it is false: sessions live in the server's memory, per instance.
+
+The architecture diagram used to draw Memory Bank, Agent Sessions and a persistent
+Agent Engine code sandbox as though all three were running. They were not. Those cards
+are now dashed and labelled **NOT WIRED — PLANNED**, with a legend explaining the
+convention, and the code-execution card names the `BuiltInCodeExecutor` actually in use.
+The top band claimed a Next.js client with Firebase Auth and React Flow; the real client
+is one static HTML file with anonymous ids in `localStorage`, and it says that now.
+
+A diagram that describes what you wish you had built is worth less than no diagram.
+
+**The user-visible consequence** is that a Cloud Run restart destroys in-flight sessions.
+Judging runs for weeks, and instances *will* recycle in that window, so the dashboard
+now detects a session the server has never heard of, rebuilds it, and retries the turn
+once — no reload, no lost conversation. `scripts\check_session_recovery.py` proves it by
+deleting the session out from under a live page and requiring the next turn to succeed.
 
 ### Fixed: a joining teammate got interviewed instead of onboarded
 
@@ -224,17 +356,45 @@ challenge_accepted/
   schemas.py          typed contracts between phases
   prompts.py          all nine instructions, side by side
   sub_agents/         one file per agent; forge.py holds the fan-out pipeline
+  api.py              /api/* read API for the dashboard
+  static/app.html     the dashboard: chat, quest map, journal, party. One file, no build
   services/
     store.py          Firestore repository, in-memory fallback
     tools.py          ADK FunctionTools over the store
 main.py               Cloud Run entrypoint via get_fast_api_app
-tests/                10 tests, no API key required
+tests/                52 tests, no API key required
+scripts/              live walkthroughs and browser-driven end-to-end checks
+deploy/               deploy.ps1, check.ps1, smoke_live.ps1, SETUP.md
 docs/                 plan + architecture diagram
 ```
 
 ## Next
 
-1. Add a `GOOGLE_API_KEY` and run `adk web` -- the prompts have never faced a model.
-2. Walk one real challenge end to end; instrument token counts from the first run.
-3. Verify the Warden -> `forge` transfer with a live key.
-4. Front end: Next.js + React Flow + Firebase Auth, Firestore listeners for the live graph.
+1. **Vertex AI Memory Bank and Agent Engine Sessions.** The wiring exists in `main.py`
+   -- `use_vertex()` returns true and both services switch to `agentengine://` the
+   moment an `AGENT_ENGINE_ID` is set. No Agent Engine has been created, so today
+   sessions are per-instance and in memory.
+2. Firebase Auth, replacing the anonymous `localStorage` ids.
+3. Close the "joining teammate is never offered a `done` node" gap in the Status table
+   -- the check exists but has never been exercised by a run that actually completed one.
+4. Map `challengeaccepted.app` to the Cloud Run service.
+
+---
+
+## How this was built, and what that taught
+
+**Tests that never call a model cannot find the bugs that matter.** All 52 pass, and
+they passed the entire time the system was silently building nothing. The 4-tool
+ceiling, the delegation loop, the dropped feedback, the duplicated group facts, the
+read-only dashboard -- every one surfaced in a scripted live run with full event
+logging, and none was reachable from a test suite that mocks the model.
+
+So the checks in `scripts/` are the ones worth reading. They boot the real app, drive
+the real browser, and assert on real output: the clipboard is read back rather than
+trusting a button that says "Copied", and the session-recovery check deletes the session
+out from under the page rather than trusting that recovery code runs.
+
+**When output is wrong, check whether the data the model needs even exists before
+rewriting the prompt.** The teammate-attribution bug read exactly like a prompt problem.
+The prompt was fine; the journal was recording `"Archivist"` as the actor, so the user's
+name had never been stored at all.

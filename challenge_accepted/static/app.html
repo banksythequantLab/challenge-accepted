@@ -308,8 +308,8 @@ function appendText(node, text) {
   node.querySelector('.body').innerHTML = md(node._raw);
 }
 
-async function ensureSession() {
-  if (sessionId) return sessionId;
+async function ensureSession(force) {
+  if (sessionId && !force) return sessionId;
   sessionId = 's_' + Math.random().toString(36).slice(2, 10);
   const state = { user_id: userId, group_id: groupId };
   if (challengeId) state.challenge_id = challengeId;
@@ -319,6 +319,29 @@ async function ensureSession() {
   });
   if (!r.ok) throw new Error('session create failed: ' + r.status);
   return sessionId;
+}
+
+// Sessions live in server memory until an Agent Engine backs them, so a Cloud Run
+// restart leaves this browser holding a sessionId the server has never heard of.
+// Without this, every send after a restart fails and the user has no idea that
+// reloading would fix it. Rebuild the session and retry once.
+async function startRun(text) {
+  const post = () => fetch('/run_sse', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      appName: APP_NAME, userId, sessionId, streaming: false,
+      newMessage: { role: 'user', parts: [{ text }] },
+    }),
+  });
+
+  await ensureSession();
+  let res = await post();
+  if (!res.ok) {
+    await ensureSession(true);
+    res = await post();
+  }
+  if (!res.ok) throw new Error('run_sse ' + res.status);
+  return res;
 }
 
 // Streams /run_sse and renders each agent event as it arrives.
@@ -335,16 +358,7 @@ async function send() {
     '<span class="typing"><i></i><i></i><i></i></span>');
 
   try {
-    await ensureSession();
-    const res = await fetch('/run_sse', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        appName: APP_NAME, userId, sessionId, streaming: false,
-        newMessage: { role: 'user', parts: [{ text }] },
-      }),
-    });
-    if (!res.ok) throw new Error('run_sse ' + res.status);
-
+    const res = await startRun(text);
     thinking.remove();
     const reader = res.body.getReader();
     const dec = new TextDecoder();
