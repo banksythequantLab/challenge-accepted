@@ -21,3 +21,5 @@ _group.err
 _ui.png
 _ui_detail.png
 _ui_copy.png
+_deploy.log
+_deploy.err

@@ -63,6 +63,34 @@ def _depth(node_id: str, by_id: dict[str, dict], seen: Optional[set[str]] = None
     return 1 + max(_depth(d, by_id, seen | {node_id}) for d in deps)
 
 
+@router.get("/healthz")
+def healthz() -> dict[str, Any]:
+    """Health + which storage backend actually engaged.
+
+    Lives on the /api router, not on the app. A `@app.get("/healthz")` added after
+    `get_fast_api_app()` returns is registered in the OpenAPI spec but 404s at runtime:
+    ADK's web UI mounts static files at "/", and that mount is registered first, so it
+    shadows any bare path added afterwards. Routes under a prefixed router are matched
+    before the mount, so they work. Verified on the deployed service.
+
+    `store` is the field to read. If it says "memory" on a deployment where
+    GOOGLE_CLOUD_PROJECT is set, Firestore silently fell back: no persistence, and each
+    Cloud Run instance holds its own private dict.
+    """
+    from . import config
+    from .services.store import store
+
+    return {
+        "ok": True,
+        "store": store.backend,
+        "vertex": config.use_vertex(),
+        "models": {
+            "reasoning": config.MODEL_REASONING,
+            "cheap": config.MODEL_CHEAP,
+        },
+    }
+
+
 @router.get("/challenges")
 def list_challenges(group_id: Optional[str] = None) -> dict[str, Any]:
     """All challenges, newest first. The UI uses this to pick one with no query string."""

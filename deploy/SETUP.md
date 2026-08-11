@@ -57,7 +57,7 @@ start is several seconds of dead air in a four-minute video.
 ## Step 4 — verify Firestore actually engaged
 
 ```powershell
-curl https://<service-url>/healthz
+curl https://<service-url>/api/healthz
 ```
 
 Expect `"store":"firestore"`. **If it says `"memory"`, stop and fix it.** The app is
@@ -78,7 +78,7 @@ To make a misconfigured deploy fail loudly instead of degrading, add
 
 ## Step 5 — the multiplayer demo beat
 
-Once `/healthz` reports `firestore`, two browser windows finally see the same data.
+Once `/api/healthz` reports `firestore`, two browser windows finally see the same data.
 That's the clip worth recording:
 
 1. Window A: run a challenge to the point where a blocker surfaces.

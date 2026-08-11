@@ -17,15 +17,22 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-if (-not (Get-Command gcloud -ErrorAction SilentlyContinue)) {
+# Resolve gcloud explicitly. A detached process does not reliably inherit a User PATH
+# that was set in the current session, and the SDK here lives at a non-standard root.
+$gcloud = (Get-Command gcloud -ErrorAction SilentlyContinue).Source
+if (-not $gcloud) { $gcloud = "B:\tools\google-cloud-sdk\bin\gcloud.cmd" }
+if (-not (Test-Path $gcloud)) {
     throw "gcloud not found. Install the Google Cloud CLI: https://cloud.google.com/sdk/docs/install"
 }
+# Credentials live off C:\ -- see the comment in bin\gcloud.cmd for why.
+if (-not $env:CLOUDSDK_CONFIG) { $env:CLOUDSDK_CONFIG = "B:\tools\gcloud-config" }
+Write-Host "==> gcloud: $gcloud" -ForegroundColor DarkGray
 
 Write-Host "==> Project: $ProjectId  Region: $Region" -ForegroundColor Cyan
-gcloud config set project $ProjectId | Out-Null
+& $gcloud config set project $ProjectId | Out-Null
 
 Write-Host "==> Enabling APIs (idempotent)" -ForegroundColor Cyan
-gcloud services enable `
+& $gcloud services enable `
     run.googleapis.com `
     firestore.googleapis.com `
     aiplatform.googleapis.com `
@@ -35,12 +42,12 @@ gcloud services enable `
 # Firestore must exist before the app writes to it. Creating a database twice is an
 # error, not a no-op, so check first.
 $dbExists = $true
-try { gcloud firestore databases describe --database="(default)" 2>$null | Out-Null }
+try { & $gcloud firestore databases describe --database="(default)" 2>$null | Out-Null }
 catch { $dbExists = $false }
 
 if (-not $dbExists) {
     Write-Host "==> Creating Firestore database (Native mode, $Region)" -ForegroundColor Cyan
-    gcloud firestore databases create --location=$Region --type=firestore-native
+    & $gcloud firestore databases create --location=$Region --type=firestore-native
 } else {
     Write-Host "==> Firestore database already exists" -ForegroundColor DarkGray
 }
@@ -59,7 +66,7 @@ $envVars = @(
 ) -join ","
 
 Write-Host "==> Deploying $Service" -ForegroundColor Cyan
-gcloud run deploy $Service `
+& $gcloud run deploy $Service `
     --source . `
     --region $Region `
     --allow-unauthenticated `
@@ -70,16 +77,33 @@ gcloud run deploy $Service `
     --max-instances 10 `
     --set-env-vars $envVars
 
-$url = gcloud run services describe $Service --region $Region --format "value(status.url)"
+# gcloud is a native executable, and PowerShell does NOT throw on a non-zero exit from
+# one -- $ErrorActionPreference="Stop" only governs cmdlets. The first version of this
+# script printed "==> Deployed" over a PERMISSION_DENIED build failure. Check explicitly.
+if ($LASTEXITCODE -ne 0) {
+    Write-Host ""
+    Write-Host "==> DEPLOY FAILED (gcloud exit $LASTEXITCODE). Nothing was deployed." -ForegroundColor Red
+    Write-Host "If the build failed on IAM, the default compute service account needs:" -ForegroundColor Yellow
+    Write-Host "  gcloud projects add-iam-policy-binding $ProjectId ``"
+    Write-Host "    --member serviceAccount:<PROJECT_NUMBER>-compute@developer.gserviceaccount.com ``"
+    Write-Host "    --role roles/cloudbuild.builds.builder"
+    exit 1
+}
+
+$url = & $gcloud run services describe $Service --region $Region --format "value(status.url)"
+if ($LASTEXITCODE -ne 0 -or -not $url) {
+    Write-Host "==> Deploy reported success but the service has no URL. Investigate." -ForegroundColor Red
+    exit 1
+}
 
 Write-Host ""
 Write-Host "==> Deployed" -ForegroundColor Green
 Write-Host "    dashboard : $url/app"
 Write-Host "    agent UI  : $url/"
-Write-Host "    health    : $url/healthz"
+Write-Host "    health    : $url/api/healthz"
 Write-Host ""
 Write-Host "Verify the store actually switched to Firestore:" -ForegroundColor Yellow
-Write-Host "    curl $url/healthz     # expect  store=firestore"
+Write-Host "    curl $url/api/healthz     # expect  store=firestore"
 Write-Host ""
 Write-Host "If it still says memory, the app fell back silently -- check that the"  -ForegroundColor Yellow
 Write-Host "service account has roles/datastore.user."  -ForegroundColor Yellow
