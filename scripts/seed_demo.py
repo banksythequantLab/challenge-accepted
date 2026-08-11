@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from challenge_accepted.services.store import store  # noqa: E402
+from demo_tools import BODIES  # noqa: E402
 
 NODES = [
     ("verify-agent-backend", "Verify agent backend", [], "done", 60),
@@ -53,7 +54,7 @@ JOURNAL = [
 ]
 
 
-def main() -> None:
+def main() -> str:
     cid = store.create_challenge(
         {
             "title": "Launch Challenge Accepted at the hackathon",
@@ -79,9 +80,10 @@ def main() -> None:
     store.set_node_status(cid, "demo-video-script", "done", "script.md committed")
 
     for node_id, ttype, name in TOOLS:
+        source, usage = BODIES.get(
+            node_id, ("# generated", "Open it and work through it top to bottom."))
         store.put_tool(cid, node_id, {
-            "type": ttype, "name": name, "source": "# generated",
-            "usage": "Open it and work through it top to bottom.",
+            "type": ttype, "name": name, "source": source, "usage": usage,
             "smoke_test_passed": True, "degraded": False,
         })
 
@@ -101,6 +103,7 @@ def main() -> None:
     print(f"  tools   : {len(store.list_tools(cid))}")
     print(f"  journal : {len(store.list_journal(cid))}")
     print(f"\nopen  http://localhost:8080/app?id={cid}")
+    return cid
 
 
 if __name__ == "__main__":

@@ -97,10 +97,15 @@ def main() -> None:
         check("Copy for Claude", read(),
               ["i'm working toward", "the step i'm on", "cleared when"])
 
-        if page.query_selector("[data-tool]"):
-            page.click("[data-tool]")
+        # "Copy tool" now lives in the tool viewer, so open it first.
+        if page.query_selector("[data-open]"):
+            page.click("[data-open]")
+            page.wait_for_timeout(500)
+            page.click("#m-copy")
             page.wait_for_timeout(400)
             check("Copy tool", read(), ["#"])
+            page.click("#m-close")
+            page.wait_for_timeout(300)
         else:
             failures.append("Copy tool: no tool button rendered on this quest")
 

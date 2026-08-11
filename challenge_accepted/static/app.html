@@ -145,6 +145,41 @@
   .node.sel rect.card{stroke-width:2.5}
   .ready{animation:pulse 2.6s ease-in-out infinite}
   @keyframes pulse{0%,100%{opacity:.3}50%{opacity:.9}}
+  /* The tool viewer. A tool you cannot open is a screenshot of a tool. */
+  #modal{position:fixed;inset:0;z-index:50;display:none;background:rgba(6,8,12,.78);
+    backdrop-filter:blur(3px);padding:32px}
+  #modal.on{display:flex;align-items:center;justify-content:center}
+  .sheet{background:var(--panel);border:1px solid var(--line);border-radius:16px;
+    width:min(1000px,100%);max-height:100%;display:flex;flex-direction:column;
+    box-shadow:0 24px 80px rgba(0,0,0,.6);animation:rise .2s ease}
+  .sheet header{display:flex;align-items:center;gap:12px;padding:16px 20px;
+    border-bottom:1px solid var(--line);flex:none;background:none}
+  .sheet h2{margin:0;font-size:16px;font-weight:700}
+  .badge{font-size:9.5px;font-weight:700;letter-spacing:.9px;text-transform:uppercase;
+    padding:3px 9px;border-radius:99px;background:rgba(255,194,75,.13);color:var(--gold);
+    border:1px solid rgba(255,194,75,.3)}
+  .badge.warn{background:rgba(255,92,92,.12);color:var(--blocked);
+    border-color:rgba(255,92,92,.35)}
+  .badge.ok{background:rgba(61,214,140,.12);color:var(--done);
+    border-color:rgba(61,214,140,.35)}
+  .sheet .usage{padding:14px 20px;color:#C3CAD8;font-size:13px;line-height:1.6;
+    border-bottom:1px solid var(--line);flex:none}
+  .sheet .stage{flex:1;min-height:0;overflow:auto;padding:0}
+  .sheet footer{display:flex;gap:8px;padding:12px 20px;border-top:1px solid var(--line);
+    flex:none;flex-wrap:wrap}
+  .sheet footer .spacer{margin-left:auto}
+  #frame{width:100%;height:min(60vh,540px);border:0;background:#fff;display:block}
+  pre.src{margin:0;padding:18px 20px;font-family:ui-monospace,Consolas,monospace;
+    font-size:12.5px;line-height:1.65;white-space:pre-wrap;word-break:break-word;
+    color:#C9D2E3}
+  .check{display:flex;gap:11px;align-items:flex-start;padding:11px 20px;
+    border-bottom:1px solid #1A1E29;cursor:pointer;font-size:13.5px}
+  .check:last-child{border-bottom:0}
+  .check input{margin:2px 0 0;width:16px;height:16px;accent-color:#3DD68C;flex:none}
+  .check.done span{text-decoration:line-through;color:var(--faint)}
+  .check .note{display:block;font-size:12px;color:var(--dim);margin-top:3px}
+  .sheet .empty{padding:28px 20px}
+
   /* Phone: stack the map above the panel instead of crushing it into a sliver.
      You scanned a QR to get here; the copy buttons have to be reachable. */
   @media (max-width:820px){
@@ -215,6 +250,25 @@
     <div class="pane" id="p-journal"><div id="journal"></div></div>
     <div class="pane" id="p-facts"><ul class="facts" id="facts"></ul></div>
   </aside>
+</div>
+
+<div id="modal">
+  <div class="sheet">
+    <header>
+      <h2 id="m-name"></h2>
+      <span class="badge" id="m-type"></span>
+      <span class="badge" id="m-smoke"></span>
+      <button class="ghost" id="m-close" style="margin-left:auto">Close</button>
+    </header>
+    <div class="usage" id="m-usage"></div>
+    <div class="stage" id="m-stage"></div>
+    <footer>
+      <button class="ghost" id="m-copy">Copy tool</button>
+      <button class="ghost" id="m-download">Download</button>
+      <span class="spacer"></span>
+      <button class="claude" id="m-claude">Copy for Claude</button>
+    </footer>
+  </div>
 </div>
 
 <script>
@@ -540,9 +594,9 @@ function showQuest(n) {
         <div class="t">${esc(t.type)}${t.degraded ? ' · degraded' : ''}</div>
         <div>${esc(t.name)}</div>
         <div class="row">
+          <button class="send" data-open="${esc(t.id)}">Open tool</button>
           <button data-fb="up"   data-t="${esc(t.id)}">👍 helped</button>
           <button data-fb="down" data-t="${esc(t.id)}">👎 didn't</button>
-          <button class="ghost" data-tool="${esc(t.id)}">Copy tool</button>
         </div></div>`).join('') ||
       '<div style="color:var(--faint);font-size:12.5px">No tool needed here.</div>'}
     <div class="row">
@@ -560,14 +614,8 @@ and any tool built for it -- paste straight into Claude">Copy for Claude</button
   };
   const fc = $('forclaude');
   if (fc) fc.onclick = () => copyText(questPrompt(n), fc);
-  $('detail').querySelectorAll('[data-tool]').forEach(b => b.onclick = () => {
-    const t = toolsById[b.dataset.tool] || {};
-    const parts = [`# ${t.name || 'Tool'} (${t.type || 'tool'})`];
-    if (t.usage) parts.push('', t.usage);
-    if (t.source) parts.push('', '```', t.source, '```');
-    if (t.smoke_test_output) parts.push('', `Smoke test output: ${t.smoke_test_output}`);
-    copyText(parts.join('\n'), b);
-  });
+  $('detail').querySelectorAll('[data-open]')
+    .forEach(b => b.onclick = () => openTool(b.dataset.open));
   $('detail').querySelectorAll('[data-fb]').forEach(b => b.onclick = async () => {
     const reason = prompt('One line on why (optional):') || '';
     await api(`/challenges/${challengeId}/feedback`, {
@@ -578,6 +626,159 @@ and any tool built for it -- paste straight into Claude">Copy for Claude</button
     b.textContent = 'recorded ✓'; b.disabled = true;
   });
 }
+
+// ---------------------------------------------------------------- tool viewer
+// The Toolwright emits a self-contained HTML document for mini_app, structured JSON
+// for checklist, Python for calculator/tracker/drill, and plain text otherwise.
+// Render each in the form that lets you actually use it.
+
+const looksHTML = s => /<html[\s>]|<!doctype html/i.test(s || '');
+const looksPython = s => /^\s*(import |from |def |class |#!)/m.test(s || '');
+
+//: The model decides the JSON shape, so accept the shapes it plausibly emits and
+//: fall back to showing raw JSON rather than rendering an empty list.
+function checklistItems(src) {
+  let data;
+  try { data = JSON.parse(src); } catch { return null; }
+  const findArray = v => {
+    if (Array.isArray(v)) return v;
+    if (v && typeof v === 'object') {
+      for (const k of ['items', 'steps', 'checklist', 'tasks', 'list'])
+        if (Array.isArray(v[k])) return v[k];
+      for (const k of Object.keys(v)) if (Array.isArray(v[k])) return v[k];
+    }
+    return null;
+  };
+  const arr = findArray(data);
+  if (!arr || !arr.length) return null;
+
+  const items = arr.map(it => {
+    if (typeof it === 'string') return { text: it, note: '' };
+    if (it && typeof it === 'object') {
+      const text = it.text || it.item || it.task || it.label || it.title ||
+                   it.step || it.name || it.description;
+      if (!text) return null;
+      const note = it.note || it.detail || it.details || it.hint ||
+                   (it.description && it.description !== text ? it.description : '');
+      return { text: String(text), note: note ? String(note) : '' };
+    }
+    return null;
+  }).filter(Boolean);
+  return items.length ? items : null;
+}
+
+function toolAsText(t) {
+  const parts = [`# ${t.name || 'Tool'} (${t.type || 'tool'})`];
+  if (t.usage) parts.push('', t.usage);
+  if (t.source) parts.push('', '```', t.source, '```');
+  if (t.smoke_test_output) parts.push('', `Smoke test output: ${t.smoke_test_output}`);
+  return parts.join('\n');
+}
+
+function renderTool(t) {
+  const stage = $('m-stage');
+  const src = t.source || '';
+  stage.innerHTML = '';
+
+  if (!src) {
+    stage.innerHTML = '<div class="empty">This tool has no saved content.</div>';
+    return;
+  }
+
+  // A self-contained document: run it. Sandboxed with no same-origin, so it cannot
+  // reach this page, its storage, or the session.
+  if (t.type === 'mini_app' || looksHTML(src)) {
+    const f = document.createElement('iframe');
+    f.id = 'frame';
+    f.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
+    f.srcdoc = src;
+    stage.appendChild(f);
+    return;
+  }
+
+  if (t.type === 'checklist') {
+    const items = checklistItems(src);
+    if (items) {
+      const key = 'ca_check_' + t.id;
+      let done = [];
+      try { done = JSON.parse(localStorage.getItem(key)) || []; } catch {}
+      items.forEach((item, i) => {
+        const row = document.createElement('label');
+        row.className = 'check' + (done.includes(i) ? ' done' : '');
+        row.innerHTML = `<input type="checkbox"${done.includes(i) ? ' checked' : ''}>
+          <span>${esc(item.text)}${
+            item.note ? `<span class="note">${esc(item.note)}</span>` : ''}</span>`;
+        row.querySelector('input').onchange = e => {
+          row.classList.toggle('done', e.target.checked);
+          done = e.target.checked ? [...done, i] : done.filter(x => x !== i);
+          localStorage.setItem(key, JSON.stringify(done));
+        };
+        stage.appendChild(row);
+      });
+      return;
+    }
+  }
+
+  const pre = document.createElement('pre');
+  pre.className = 'src';
+  pre.textContent = src;
+  stage.appendChild(pre);
+}
+
+function openTool(id) {
+  const t = toolsById[id];
+  if (!t) return;
+
+  $('m-name').textContent = t.name || 'Tool';
+  $('m-type').textContent = t.type || 'tool';
+
+  const smoke = $('m-smoke');
+  if (t.degraded) {
+    smoke.textContent = 'degraded';
+    smoke.className = 'badge warn';
+  } else if (t.smoke_test_passed) {
+    smoke.textContent = 'smoke test passed';
+    smoke.className = 'badge ok';
+  } else {
+    smoke.textContent = 'untested';
+    smoke.className = 'badge warn';
+  }
+
+  const usage = $('m-usage');
+  usage.innerHTML = md(t.usage || '');
+  usage.style.display = t.usage ? '' : 'none';
+
+  renderTool(t);
+
+  $('m-copy').onclick = e => copyText(toolAsText(t), e.target);
+  $('m-claude').onclick = e => copyText(
+    `${toolAsText(t)}\n\nHelp me use this.`, e.target);
+  $('m-download').onclick = () => {
+    const ext = looksHTML(t.source) ? 'html'
+      : t.type === 'checklist' ? 'json'
+      : looksPython(t.source) ? 'py' : 'txt';
+    const name = (t.name || 'tool').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    const url = URL.createObjectURL(new Blob([t.source || ''], {type: 'text/plain'}));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${name}.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  $('modal').classList.add('on');
+}
+
+function closeTool() {
+  $('modal').classList.remove('on');
+  $('m-stage').innerHTML = '';   // stop any running mini-app
+}
+
+$('m-close').onclick = closeTool;
+$('modal').onclick = e => { if (e.target.id === 'modal') closeTool(); };
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && $('modal').classList.contains('on')) closeTool();
+});
 
 function drawJournal(entries) {
   if (entries.length === lastJournal) return;

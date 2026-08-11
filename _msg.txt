@@ -1,43 +1,43 @@
-Make the docs describe what exists, and survive a Cloud Run restart
+Make the tools openable, because that is the demo
 
-Checked the actual Devpost rules: deadline Aug 31 5pm PDT, README must carry a
-step-by-step spin-up guide, private repos must grant access to testing@devpost.com
-and cloudhackathons@google.com. The docs were failing the first of those and
-actively misrepresenting the build.
+The pitch is "the agents built you a tool" and the app had no way to open one.
+The quest card offered "Copy tool" -- a clipboard button for a thing nobody had
+seen. On camera that beat is dead: you cannot show a judge a checklist by
+copying it.
 
-README said "v0.1", "10 tests", and "Not built: Cloud Run deploy" -- for a project
-that is deployed, Firestore-backed and driven end to end from the browser. It is
-the first thing a judge reads and it was selling the project short by two months
-of work. Rewritten: real status, live URLs, local run, the four browser-driven
-verification scripts, and a deploy section including the IAM grants deploy.ps1
-does NOT perform (checked the script rather than trusting memory -- the roles were
-granted by hand and would have stranded anyone else on the first build).
+Added a tool viewer. Click a step's tool and it opens a modal that renders the
+artifact by what it actually is, rather than dumping a blob of text:
 
-The architecture diagram drew Memory Bank, Agent Engine Sessions and a persistent
-Agent Engine sandbox as if all three were live. None are. Those cards are now
-dashed and labelled NOT WIRED -- PLANNED, with a legend for the convention, and
-the code-execution card names the BuiltInCodeExecutor actually in use. The client
-band claimed Next.js on Cloud Run with Firebase Auth and React Flow; it is one
-static HTML file with anonymous localStorage ids, and now says so. The Firestore
-edge claimed real-time listeners; it is a 4-second poll of /api/*.
+  mini_app        real iframe, sandbox="allow-scripts allow-forms allow-modals"
+                  and no allow-same-origin, so agent-written HTML runs live but
+                  cannot reach into the page
+  checklist       parsed JSON rendered as tickable items
+  calculator      syntax-styled source
+  research_brief  prose
+  script          prose
 
-Sessions live in server memory until an Agent Engine exists, so a Cloud Run
-restart leaves the browser holding a sessionId the server has never heard of --
-and judging runs for seven weeks, during which instances certainly recycle. Every
-send after that failed silently with no hint that reloading would fix it. startRun()
-now rebuilds a dead session and retries once.
+Shape detection is defensive on purpose -- the agents write this JSON, so
+checklistItems() accepts items|steps|checklist|tasks|list and reads the label
+from text|item|task|label|title|step|name|description before giving up and
+falling back to source view. A malformed tool degrades to something readable
+instead of an empty box.
 
-scripts/check_session_recovery.py proves it the only way worth trusting: it DELETEs
-the session out from under a live page, asserts the server really 404s it, then
-requires the next turn to still get an answer. It does.
+"Open tool" is now the primary action on the quest card. Copy tool, Download and
+Copy for Claude moved into the modal footer, where they follow looking at the
+thing rather than replacing it.
 
-Demo script updated for the app as it now exists -- there is no sign-in, so the
-two-user beat needs incognito rather than "signed in as different users" -- plus a
-copy-to-Claude beat, /api/healthz for the required proof-of-deployment shot, and
-two explicit warnings: do not say "Memory Bank" on camera, and do not read out
-challengeaccepted.app until it actually resolves.
+The seeded demo tools were placeholders, which would have looked exactly as thin
+as they were. scripts/demo_tools.py gives all five real bodies: a working pacing
+calculator, a six-item backend checklist, a hosting comparison, a demo script
+template, and STATE_SIMULATOR -- an actual HTML mini-app with animated worker
+bars that drains a queue when you click Start.
 
-52 tests pass; copy and session-recovery checks pass.
+scripts/check_tools.py opens every tool and asserts the right renderer fired.
+The mini_app case clicks Start and polls for completion; my first version used a
+fixed 2500ms wait and reported a failure that was really my timeout being
+shorter than the slowest simulated worker. Fixed the test, not the app.
+
+52 tests pass. check_tools and check_copy pass. Console clean.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
 Claude-Session: https://claude.ai/code/session_01U8Tn5CvdGdzSrzNAaLRTm2
