@@ -31,13 +31,31 @@ from typing import AsyncGenerator
 from google.adk.agents import BaseAgent, LlmAgent, LoopAgent, ParallelAgent, SequentialAgent
 from google.adk.agents.invocation_context import InvocationContext
 from google.adk.code_executors import BuiltInCodeExecutor
+from google.adk.agents.readonly_context import ReadonlyContext
 from google.adk.events import Event, EventActions
 from google.genai import types
 from pydantic import BaseModel, Field
 
 from .. import config, prompts
 from ..schemas import ToolSpec
-from ..services.tools import save_tool
+from ..services.tools import _tool_feedback, save_tool
+
+
+def quartermaster_instruction(ctx: ReadonlyContext) -> str:
+    """QUARTERMASTER, plus whatever the user has already rejected.
+
+    An ADK agent with an `output_schema` gets no tools, so Quartermaster cannot call
+    `read_challenge_state` and discover that the user hated the last thing it specced.
+    Injecting the rejections into the prompt is the only channel available -- and
+    without it the thumbs-down button is decorative, which is what it was.
+    """
+    cid = ctx.state.get("challenge_id")
+    if not cid:
+        return prompts.QUARTERMASTER
+    rejected = [f for f in _tool_feedback(str(cid)) if f.get("verdict") == "down"]
+    if not rejected:
+        return prompts.QUARTERMASTER
+    return prompts.QUARTERMASTER + "\n\n" + prompts.rejected_tools_banner(rejected)
 
 
 class ToolSpecList(BaseModel):
@@ -52,7 +70,7 @@ quartermaster = LlmAgent(
     name="quartermaster",
     model=config.MODEL_REASONING,
     description="Decides, per node, which of the seven tool types would make it trivial.",
-    instruction=prompts.QUARTERMASTER,
+    instruction=quartermaster_instruction,
     mode="single_turn",
     output_schema=ToolSpecList,
     output_key="tool_specs",

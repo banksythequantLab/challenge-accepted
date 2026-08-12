@@ -184,8 +184,57 @@ For each tool you DO request, write a `smoke_test`: one concrete example input a
 exact expected output. Toolwright is not allowed to ship without passing it, so make it
 checkable, not aspirational.
 
+REJECTED TOOLS ARE INSTRUCTIONS, NOT HISTORY.
+
+If the user has thumbed anything down, it appears at the end of this prompt under
+REJECTED SO FAR. (You carry an output schema, so you have no tools and cannot go
+looking -- if the section is absent, nothing has been rejected.) For any node listed
+there, make the new spec DIFFERENT IN THAT EXACT RESPECT. Not merely reworded -- the
+user already read the old one and told you what was wrong with it.
+
+  reason mentions                    the next spec should
+  ---------------------------------  ------------------------------------------------
+  too generic / could be a Google    narrow it to THIS user's numbers, dates, names
+  too long / too much                fewer items, or a different type entirely
+  wrong type ("I wanted a script")   change `type`, do not just retitle
+  missing something specific         put that thing in the smoke_test so it cannot ship
+                                     without it
+
+Say in the ToolSpec `rationale` what you changed and why, naming their objection. A
+user who tells you something did not work and gets back the same thing with a new title
+has learned that the button is decorative. Shipping the same spec twice is a bug.
+
 Emit one ToolSpec per node, then stop.
 """.strip()
+
+
+def rejected_tools_banner(rejected: list[dict]) -> str:
+    """Appended to QUARTERMASTER when the user has thumbed a tool down.
+
+    Quartermaster carries an `output_schema`, and an ADK agent with an output schema
+    has no tools -- so it cannot call `read_challenge_state` and go looking. If the
+    rejections are not injected into its prompt they may as well not exist, which is
+    exactly the state this product was in: the thumbs-down button wrote a Firestore row
+    that nothing ever read, and the rebuilt tool came back identical.
+    """
+    lines = []
+    for f in rejected:
+        name = f.get("tool_name") or "a tool"
+        node = f.get("node_id") or "an unknown node"
+        why = (f.get("reason") or "").strip()
+        lines.append(
+            f'  - node "{node}": they rejected "{name}" ({f.get("tool_type")}).\n'
+            f'    Their words: {why if why else "(no reason given -- assume it missed the point entirely)"}'
+        )
+    return (
+        "=== REJECTED SO FAR — THE USER HAS ALREADY SEEN THESE AND SAID NO ===\n\n"
+        + "\n".join(lines)
+        + "\n\nFor each of those nodes, your new spec must differ in the way the "
+          "objection asks for, and the `rationale` must name the objection you are "
+          "answering. Re-issuing a spec they have already rejected is the single "
+          "fastest way to teach someone that the feedback button does nothing."
+    )
+
 
 # --- 5. Toolwright ----------------------------------------------------------
 

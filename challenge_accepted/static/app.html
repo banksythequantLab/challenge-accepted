@@ -108,6 +108,13 @@
   .kind.blocker{background:#331416;color:#FF8A8A}
   .kind.build{background:#332708;color:#FFD27A}
   .kind.question,.kind.answer{background:#122540;color:#8FBBFF}
+  .why{display:flex;gap:6px;margin-top:8px}
+  .why input{flex:1;min-width:0;background:var(--panel);color:var(--ink);
+    border:1px solid var(--line);border-radius:7px;padding:6px 9px;font:inherit;
+    font-size:12px}
+  .why input:focus{outline:none;border-color:var(--gold)}
+  .why.done{display:block;font-size:12px;color:var(--done);margin-top:8px}
+  .why .wait{font-size:12px;color:var(--dim)}
   .partybar{display:flex;align-items:center;gap:10px;padding:10px 14px;
             border-bottom:1px solid var(--line)}
   .roster{font-size:11.5px;color:var(--dim);line-height:1.4;flex:1}
@@ -647,15 +654,51 @@ and any tool built for it -- paste straight into Claude">Copy for Claude</button
   if (fc) fc.onclick = () => copyText(questPrompt(n), fc);
   $('detail').querySelectorAll('[data-open]')
     .forEach(b => b.onclick = () => openTool(b.dataset.open));
-  $('detail').querySelectorAll('[data-fb]').forEach(b => b.onclick = async () => {
-    const reason = prompt('One line on why (optional):') || '';
-    await api(`/challenges/${challengeId}/feedback`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ target_type: 'tool', target_id: b.dataset.t,
-                             verdict: b.dataset.fb, reason }),
-    });
-    b.textContent = 'recorded ✓'; b.disabled = true;
-  });
+  $('detail').querySelectorAll('[data-fb]').forEach(b => b.onclick = () => askWhy(b));
+}
+
+//: This used to call window.prompt(). Two problems, both fatal for a demo: a native
+//: modal over a dark app looks like a browser error, and it BLOCKS the page, so no
+//: automated check could ever click this button -- which is part of why the whole
+//: feedback path went untested long enough to become write-only. Inline instead.
+function askWhy(btn) {
+  const tool = btn.closest('.tool');
+  if (tool.querySelector('.why')) return;
+  const down = btn.dataset.fb === 'down';
+  const box = document.createElement('div');
+  box.className = 'why';
+  box.innerHTML = `
+    <input id="whytext" placeholder="${down
+      ? 'What was wrong with it? The next one is built from this.'
+      : 'What made it useful? (optional)'}" />
+    <button class="send" id="whysend">Send</button>`;
+  tool.appendChild(box);
+  const text = box.querySelector('#whytext');
+  text.focus();
+
+  const send = async () => {
+    const reason = text.value.trim();
+    box.innerHTML = '<span class="wait">sending…</span>';
+    try {
+      await api(`/challenges/${challengeId}/feedback`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ target_type: 'tool', target_id: btn.dataset.t,
+                               verdict: btn.dataset.fb, reason }),
+      });
+    } catch (e) {
+      box.innerHTML = '<span class="wait">could not save — ' + esc(e.message) + '</span>';
+      return;
+    }
+    box.className = 'why done';
+    box.textContent = down
+      ? 'Noted. Ask the agents to rebuild this one and they will use your reason.'
+      : 'Noted — more like this one.';
+    tool.querySelectorAll('[data-fb]').forEach(x => x.disabled = true);
+    btn.textContent = 'recorded ✓';
+  };
+
+  box.querySelector('#whysend').onclick = send;
+  text.onkeydown = e => { if (e.key === 'Enter') send(); };
 }
 
 // ---------------------------------------------------------------- tool viewer

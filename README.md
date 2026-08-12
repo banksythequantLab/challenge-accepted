@@ -102,6 +102,8 @@ python scripts\check_session_recovery.py  # deletes the session mid-conversation
                                         # proves the page recovers without a reload
 python scripts\check_tools.py           # opens all five tool types and asserts the
                                         # right renderer fired; runs the mini-app
+python scripts\check_feedback.py        # clicks thumbs-down and follows the objection
+                                        # all the way into the Quartermaster's prompt
 python scripts\check_copy.py            # clicks every copy button and reads the
                                         # clipboard back, desktop and iPhone viewport
 python scripts\shoot_ui.py              # seeds demo data, screenshots the dashboard
@@ -256,6 +258,33 @@ Judging runs for weeks, and instances *will* recycle in that window, so the dash
 now detects a session the server has never heard of, rebuilds it, and retries the turn
 once — no reload, no lost conversation. `scripts\check_session_recovery.py` proves it by
 deleting the session out from under a live page and requiring the next turn to succeed.
+
+### Fixed: the feedback button was decorative
+
+The pitch says *"when something isn't useful I say so, and the next generation is
+different."* It was not. `record_feedback` wrote a Firestore row and **nothing in the
+codebase ever read it** — `read_challenge_state` did not return it, no prompt mentioned
+it, and a grep for readers came back empty. The next generation was identical.
+
+There was a second reason it had gone unnoticed for so long: the reason box was a
+native `window.prompt()`. That blocks the page, so no browser check could ever click
+the button. An untestable control is a control that rots.
+
+Three changes:
+
+* `read_challenge_state` now returns `tool_feedback`, **resolved** — a raw row carries
+  a `tool_...` id, which no model can reason about, so each entry names the node, the
+  tool and its type, with thumbs-down first.
+* The Quartermaster carries an `output_schema`, and an ADK agent with an output schema
+  gets **no tools** — so it could not have looked the feedback up even if it wanted to.
+  Its instruction is now an `InstructionProvider` that injects the rejections, with the
+  user's own words, plus a table mapping common objections to what must change.
+* The reason box is inline, styled, and non-blocking.
+
+`scripts\check_feedback.py` clicks the button in a real browser, fails loudly if a
+native dialog appears, and then follows the objection all the way to the Quartermaster's
+actual prompt string. It asserts the prompt *differs* with and without the feedback —
+because "the loop is closed" and "the loop is open" otherwise look identical.
 
 ### Fixed: the browser posted session state to an endpoint that silently reshaped it
 

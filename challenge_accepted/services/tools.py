@@ -274,8 +274,13 @@ def read_challenge_state(tool_context: ToolContext) -> dict[str, Any]:
     `recent_journal` is included so you can attribute a group fact to the teammate who
     actually hit it ("Derek found...") rather than stating it anonymously.
 
+    `tool_feedback` carries the user's thumbs up/down on tools already built, with
+    their reason and the node it belongs to. Thumbs-down entries come first. Read it
+    before building anything for a node that already has a rejected tool.
+
     Returns:
-        A dict with status, charter, nodes, tools, group_facts and recent_journal.
+        A dict with status, charter, nodes, tools, group_facts, recent_journal and
+        tool_feedback.
     """
     group_facts = (store.get("groups", _group_id(tool_context)) or {}).get("shared_facts", [])
     cid = _challenge_id(tool_context)
@@ -304,7 +309,34 @@ def read_challenge_state(tool_context: ToolContext) -> dict[str, Any]:
             {"actor": j.get("actor"), "kind": j.get("kind"), "text": j.get("text")}
             for j in store.list_journal(cid)[-12:]
         ],
+        "tool_feedback": _tool_feedback(cid),
     }
+
+
+def _tool_feedback(cid: str) -> list[dict[str, Any]]:
+    """What the user actually thought of the tools, resolved to names they'd recognise.
+
+    Feedback used to be write-only. The button wrote a Firestore row and nothing ever
+    read it, so "tell it what didn't work and the next one is different" was a promise
+    the product did not keep -- the next one was identical. Raw rows are no use to a
+    model either: `target_id` is a `tool_...` id, and no agent can reason about that.
+    Resolve to node and name, and put the thumbs-down first, because that is the
+    feedback that has to change something.
+    """
+    tools = {t.get("id"): t for t in store.list_tools(cid)}
+    out: list[dict[str, Any]] = []
+    for fb in store.list_feedback(cid):
+        tool = tools.get(fb.get("target_id"), {})
+        out.append({
+            "target_type": fb.get("target_type"),
+            "node_id": tool.get("node_id"),
+            "tool_name": tool.get("name"),
+            "tool_type": tool.get("type"),
+            "verdict": fb.get("verdict"),
+            "reason": fb.get("reason") or "",
+        })
+    out.sort(key=lambda f: f.get("verdict") != "down")
+    return out
 
 
 def complete_node(node_id: str, evidence: str, tool_context: ToolContext) -> dict[str, Any]:
