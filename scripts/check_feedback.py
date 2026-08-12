@@ -142,12 +142,44 @@ def main() -> None:
         still_enabled = page.eval_on_selector_all(
             "[data-fb]", "els => els.filter(e => !e.disabled).length")
         page.screenshot(path=str(ROOT / "_feedback.png"))
+
+        # --- the rebuild button -------------------------------------------------
+        # Telling the user "now go and ask for a rebuild" is asking them to do the
+        # product's job. Clicking it must switch to the chat and compose a turn that
+        # names the step, the tool and their objection -- Warden reads the chat, and
+        # "rebuild it" alone leaves it guessing which node we mean.
+        if not page.is_visible("#rebuild"):
+            browser.close()
+            sys.exit("FAIL: no Rebuild button after a thumbs-down")
+
+        # Do not actually run the turn -- that costs a model call and is drive_chat's
+        # job. Neuter send() and assert on what it was about to send.
+        page.evaluate("() => { window.__sent = null; window.send = "
+                      "() => { window.__sent = document.getElementById('input').value; }; }")
+        page.click("#rebuild")
+        page.wait_for_timeout(300)
+        sent = page.evaluate("() => window.__sent")
+        on_chat = page.eval_on_selector(
+            '.tab[data-p="chat"]', "e => e.classList.contains('on')")
+        _p(f"\nrebuild sends: {(sent or '')[:150]!r}")
+        _p(f"switched tab : {on_chat}")
         browser.close()
 
     if still_enabled:
         failures.append(f"{still_enabled} feedback button(s) still clickable after voting")
     if not confirm:
         failures.append("no confirmation text after sending")
+    if not sent:
+        failures.append("Rebuild did not start a turn")
+    else:
+        if REASON not in sent:
+            failures.append("the rebuild turn does not carry the user's reason")
+        if tool_name not in sent:
+            failures.append(f"the rebuild turn does not name the tool ({tool_name})")
+        if "reworded" not in sent.lower():
+            failures.append("the rebuild turn does not rule out a reworded repeat")
+    if not on_chat:
+        failures.append("Rebuild left the user on the Quest tab, watching nothing happen")
 
     # --- half 1: it was actually stored, with the reason -----------------------
     stored = store.list_feedback(cid)

@@ -102,8 +102,15 @@ python scripts\check_session_recovery.py  # deletes the session mid-conversation
                                         # proves the page recovers without a reload
 python scripts\check_tools.py           # opens all five tool types and asserts the
                                         # right renderer fired; runs the mini-app
+python scripts\check_climb.py           # clicks Work on this, reports a step done with
+                                        # evidence, and requires the map to turn it
+                                        # green without a reload
 python scripts\check_feedback.py        # clicks thumbs-down and follows the objection
                                         # all the way into the Quartermaster's prompt
+python scripts\check_forge_ui.py        # replays a synthetic ADK stream; asserts the
+                                        # worker lanes fill and the read side does NOT
+                                        # freeze while the agents work
+python scripts\check_phone.py           # the whole app on an iPhone 13 with real taps
 python scripts\check_copy.py            # clicks every copy button and reads the
                                         # clipboard back, desktop and iPhone viewport
 python scripts\shoot_ui.py              # seeds demo data, screenshots the dashboard
@@ -258,6 +265,52 @@ Judging runs for weeks, and instances *will* recycle in that window, so the dash
 now detects a session the server has never heard of, rebuilds it, and retries the turn
 once — no reload, no lost conversation. `scripts\check_session_recovery.py` proves it by
 deleting the session out from under a live page and requiring the next turn to succeed.
+
+### Fixed: the whole read side froze while the agents worked
+
+```js
+setInterval(() => { if (!busy) refresh(); }, 4000);   // the old line
+```
+
+`busy` is true for the entire length of a run, and a FORGE run is about a minute. So
+during the one stretch where the map grows from nothing to eleven nodes, four tools get
+built in parallel and the journal fills with agent decisions, **the screen showed none
+of it** and then snapped to the finished state at the end. The most interesting thing
+this system does was invisible while it was happening.
+
+It now polls *faster* while a run is live (1.2s) than when idle (4s), and skips only the
+one thing that would be destructive — rebuilding the quest panel while you are typing
+into it.
+
+Alongside that, two things that made parallelism unreadable:
+
+* Action chips carried no author, so four Toolwrights building concurrently rendered as
+  an anonymous column of "writing code…" — one agent stuttering, not four working.
+  Every chip is now attributed.
+* A new **forge rail** draws a lane per worker, each showing writing code → smoke test
+  passed → shipped ✓, with failures marked red until the retry succeeds. Parallelism is
+  a shape now instead of a claim.
+* An empty Toolwright slot is told to say "idle" and stop, which is correct for the
+  agent and wrong for the screen: the loop runs several passes over four slots, so a
+  real turn buried the work under bubbles that said nothing. Those are suppressed; the
+  rail carries that information instead.
+
+`scripts\check_forge_ui.py` replays a synthetic ADK event stream — deterministic, free,
+and able to assert on *timing*, which a live run cannot. It fails if fewer than two
+lanes are live mid-stream, or if the read side did not refresh at all during the run.
+
+### Fixed: three ways the app was broken on a phone
+
+`scripts\check_phone.py` drives an iPhone 13 viewport with real taps. It found:
+
+* **The composer was 13px and the feedback field 12px.** iOS Safari force-zooms the
+  page when you focus an input under 16px *and does not zoom back out* — so the first
+  tap into either one stranded the user at 1.3× with the layout off the right edge.
+  Both are 16px on small screens now. This is a threshold, not a preference.
+* **Invite was a 30px tap target.** Buttons get `min-height:36px` on touch.
+* **The Copy chip covered the words it was offering to copy.** It is permanently
+  visible on touch (correct — reveal-on-hover means never on a phone), so bot bubbles
+  now reserve room for it rather than letting it float over the first line.
 
 ### Fixed: the feedback button was decorative
 
