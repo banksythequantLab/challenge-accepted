@@ -1,0 +1,174 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Challenge Accepted — pricing and unit economics</title>
+<!--
+  The 3:35 demo beat is "business model card + live URL" and there was no card, so it
+  would have been ten seconds of Derek reading numbers off a markdown file. Full-screen
+  this instead.
+
+  Same palette as the dashboard on purpose: cutting from the app to a differently-styled
+  slide reads as two projects. Self-contained, no fonts to fetch, no network -- it must
+  render on a laptop with wifi off at 2am.
+
+  Every number here is measured or arithmetic, and the arithmetic is shown. A pricing
+  slide with an unexplained margin figure invites exactly the question you do not want
+  on camera.
+-->
+<style>
+  :root{
+    --bg:#0B0D12; --panel:#12151D; --panel2:#171B25; --line:#232838;
+    --ink:#EDEFF3; --dim:#8B93A7; --faint:#5A6274;
+    --active:#4C8DFF; --done:#3DD68C; --gold:#FFC24B; --violet:#A78BFA;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{
+    background:var(--bg); color:var(--ink); display:flex; align-items:center;
+    justify-content:center; padding:4vh 4vw;
+    font:16px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  .card{width:min(1180px,100%)}
+
+  header{display:flex;align-items:baseline;gap:16px;margin-bottom:6px}
+  .logo{
+    font-weight:800; letter-spacing:.16em; font-size:15px;
+    background:linear-gradient(90deg,var(--gold),var(--violet));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  h1{font-size:clamp(26px,3.4vw,42px); margin:0 0 4px; letter-spacing:-.02em}
+  .sub{color:var(--dim); font-size:clamp(13px,1.3vw,16px); margin:0 0 26px}
+
+  .tiers{display:grid; grid-template-columns:repeat(4,1fr); gap:14px}
+  .tier{
+    background:var(--panel); border:1px solid var(--line); border-radius:14px;
+    padding:18px 16px 16px; display:flex; flex-direction:column;
+  }
+  .tier.hero{
+    background:var(--panel2); border-color:var(--gold);
+    box-shadow:0 0 30px rgba(255,194,75,.13);
+  }
+  .name{
+    font-size:10.5px; letter-spacing:.13em; text-transform:uppercase;
+    color:var(--faint); font-weight:700;
+  }
+  .tier.hero .name{color:var(--gold)}
+  .price{font-size:clamp(24px,2.7vw,34px); font-weight:800; margin:8px 0 2px;
+         letter-spacing:-.02em}
+  .price small{font-size:13px; font-weight:500; color:var(--dim); letter-spacing:0}
+  .tier ul{list-style:none; margin:12px 0 0; padding:0; font-size:13px;
+           color:#C3CAD8}
+  .tier li{padding:5px 0 5px 18px; position:relative}
+  .tier li::before{
+    content:''; position:absolute; left:0; top:11px; width:7px; height:7px;
+    border-radius:99px; background:var(--line);
+  }
+  .tier.hero li::before{background:var(--done)}
+
+  .econ{
+    margin-top:20px; background:var(--panel); border:1px solid var(--line);
+    border-radius:14px; padding:18px 20px;
+    display:grid; grid-template-columns:1.35fr 1fr; gap:26px;
+  }
+  h2{
+    font-size:10.5px; letter-spacing:.13em; text-transform:uppercase;
+    color:var(--faint); font-weight:700; margin:0 0 12px;
+  }
+  .rows{display:grid; gap:9px}
+  .row{display:flex; align-items:baseline; gap:10px; font-size:14px}
+  .row .lbl{color:var(--dim)}
+  .row .dots{flex:1; border-bottom:1px dotted #2A3040; transform:translateY(-4px)}
+  .row .val{font-variant-numeric:tabular-nums; font-weight:600}
+  .val.good{color:var(--done)}
+  .val.gold{color:var(--gold)}
+
+  .bars{display:grid; gap:12px; align-content:center}
+  .bar-lbl{display:flex; justify-content:space-between; font-size:12.5px;
+           color:var(--dim); margin-bottom:5px}
+  .bar-lbl b{color:var(--ink); font-variant-numeric:tabular-nums}
+  .track{height:9px; background:#1A1E29; border-radius:99px; overflow:hidden}
+  .fill{height:100%; border-radius:99px}
+
+  footer{
+    margin-top:16px; display:flex; justify-content:space-between; gap:20px;
+    font-size:12px; color:var(--faint); border-top:1px solid var(--line);
+    padding-top:12px;
+  }
+  footer b{color:var(--dim); font-weight:600}
+  .note{font-size:12px; color:var(--faint); margin-top:10px; line-height:1.6}
+
+  @media (max-width:900px){
+    .tiers{grid-template-columns:repeat(2,1fr)}
+    .econ{grid-template-columns:1fr}
+  }
+</style>
+
+<div class="card">
+  <header><span class="logo">CHALLENGE ACCEPTED</span></header>
+  <h1>Priced per person, costed per challenge.</h1>
+  <p class="sub">Every figure below is measured from real runs on Gemini 3.6 Flash, not modelled.</p>
+
+  <div class="tiers">
+    <div class="tier">
+      <div class="name">Free</div>
+      <div class="price">$0</div>
+      <ul><li>1 challenge</li><li>3 tools</li><li>Enough to see it work</li></ul>
+    </div>
+    <div class="tier">
+      <div class="name">Solo</div>
+      <div class="price">$19<small> /mo</small></div>
+      <ul><li>5 challenges</li><li>40 tools a month</li><li>Full quest map</li></ul>
+    </div>
+    <div class="tier hero">
+      <div class="name">Crew</div>
+      <div class="price">$29<small> /seat/mo</small></div>
+      <ul><li>Unlimited challenges</li><li><b>Shared group memory</b></li><li>Live graph, party roster</li></ul>
+    </div>
+    <div class="tier">
+      <div class="name">Forge</div>
+      <div class="price">$99<small> /mo</small></div>
+      <ul><li>400 tools</li><li>API access</li><li>White-label</li></ul>
+    </div>
+  </div>
+
+  <div class="econ">
+    <div>
+      <h2>Measured cost — one full challenge</h2>
+      <div class="rows">
+        <div class="row"><span class="lbl">Graph size</span><span class="dots"></span><span class="val">12 nodes, 6 tools</span></div>
+        <div class="row"><span class="lbl">Prompt tokens</span><span class="dots"></span><span class="val">243k</span></div>
+        <div class="row"><span class="lbl">Billed output <em>(incl. thinking)</em></span><span class="dots"></span><span class="val">66k</span></div>
+        <div class="row"><span class="lbl">Cost to serve</span><span class="dots"></span><span class="val gold">$0.86</span></div>
+        <div class="row"><span class="lbl">With a blocker and a re-plan</span><span class="dots"></span><span class="val">$1.90</span></div>
+        <div class="row"><span class="lbl">Break-even at $29/seat</span><span class="dots"></span><span class="val good">34 challenges / user / month</span></div>
+      </div>
+      <p class="note">
+        Thinking tokens bill as <em>output</em> on Gemini 3.x and sit in a separate
+        counter. Summing the obvious one under-reports cost by up to 3&times; — the
+        $0.86 includes them.
+      </p>
+    </div>
+
+    <div class="bars">
+      <div>
+        <div class="bar-lbl"><span>Typical user, per month</span><b>~4 challenges</b></div>
+        <div class="track"><div class="fill" style="width:12%;background:var(--active)"></div></div>
+      </div>
+      <div>
+        <div class="bar-lbl"><span>Break-even</span><b>34 challenges</b></div>
+        <div class="track"><div class="fill" style="width:100%;background:#2A3040"></div></div>
+      </div>
+      <div>
+        <div class="bar-lbl"><span>Gross margin at typical usage</span><b>~88%</b></div>
+        <div class="track"><div class="fill" style="width:88%;background:var(--done)"></div></div>
+      </div>
+      <p class="note" style="margin-top:2px">
+        Headroom is 8&times;, so a heavy month costs margin rather than money.
+      </p>
+    </div>
+  </div>
+
+  <footer>
+    <span><b>Next:</b> Challenge Packs — every finished graph is a template. Publish it, take 30%.</span>
+    <span><b>Live:</b> challenge-accepted-xk3m7ygefa-uc.a.run.app</span>
+  </footer>
+</div>

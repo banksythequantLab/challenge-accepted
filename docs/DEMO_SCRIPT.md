@@ -29,6 +29,9 @@ python main.py                     # http://localhost:8080/app
   live for the camera. If a live build fails on camera you have the seeded version to
   cut to — that's why `seed_demo.py` exists.
 - Close Slack, email, notifications. Full screen. 1600×900 or larger.
+- **Open `docs\business_model.html` in a background tab** for the closing beat. It uses
+  the dashboard's palette so the cut doesn't look like two different projects, and
+  `python scripts\shoot_card.py` verifies it fits 1920×1080 without clipping.
 - Have `/api/healthz` open in a tab showing `"store":"firestore"` -- the rules require
   **visual proof of Google Cloud deployment**, and this plus the Cloud Run console is it.
 
@@ -46,7 +49,7 @@ python main.py                     # http://localhost:8080/app
 | **2:50–3:05** | Thumbs down on a tool + reason | "And when something isn't useful, I say so —" click 👎, type a **specific** reason into the inline box ("too generic, I want my own numbers in it") "— and the next generation is built from that sentence. Not a rating. The words." Then ask the agents to rebuild that step and let the new spec's rationale name your objection. |
 | **3:05–3:20** | Click **Copy for Claude** on a quest, paste into Claude | "The work doesn't end in my app. One click copies the step, the goal it serves, and the source of the tool it built — straight into whatever I'm already using." Paste it. Let the paste land on screen. |
 | **3:20–3:35** | Architecture diagram, then Cloud Console | "Nine agents on Google ADK and Gemini 3.6 Flash, deployed on Cloud Run with Firestore as the shared source of truth." Show the Cloud Run console with the service running. Show `/api/healthz` reading `"store":"firestore"`. |
-| **3:35–3:45** | Business model card + live URL | "Nineteen dollars solo, twenty-nine a seat for teams. Measured cost is about 86 cents a challenge." Show the live Cloud Run URL on screen. |
+| **3:35–3:45** | `docs\business_model.html`, full-screened | "Nineteen dollars solo, twenty-nine a seat for teams. Measured cost is about 86 cents a challenge." Show the live Cloud Run URL on screen. |
 
 > **Say "Vertex AI Memory Bank" nowhere.** It is not wired — `use_vertex()` is false and
 > the architecture diagram marks it *NOT WIRED — PLANNED*. Claiming it on camera is the

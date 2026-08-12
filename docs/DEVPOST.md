@@ -104,6 +104,28 @@ don't call a model — which is the actual lesson.
 - **Token accounting was wrong.** Thinking tokens bill as *output* on Gemini 3.x and live
   in `thoughts_token_count`, separate from `candidates_token_count`. Summing candidates
   alone under-reported cost by up to 3x.
+- **A request that could not fail, and therefore told us nothing.** The dashboard created
+  its ADK session by posting `{"state": {...}}` to `POST .../sessions/{id}`. That endpoint
+  declares `state` as a *bare body parameter* — the whole body **is** the state — so every
+  session was created with state equal to `{"state": {...}}`, one level too deep. FastAPI
+  returned `200 OK`. Nothing logged. Three unrelated-looking symptoms followed from it:
+  every challenge created from the dashboard was owned by `anon` in group `grp_anon`, a
+  teammate opening an invite link resolved to their own private group, and the Warden
+  re-interviewed people about a goal already drawn on the screen behind the chat panel.
+  Found only by driving **two real browsers at once**.
+- **An agent claiming a write it had no tool to perform.** Warden answered a teammate with
+  *"I've recorded that into our shared group memory."* Nothing was written —
+  `remember_group_fact` was on Archivist and Coach, not on Warden. It was the obviously
+  right sentence to say, so the model said it. An agent that can claim a thing must be
+  able to do the thing.
+- **A rule that lost an argument with seven other rules.** "A joining teammate does not get
+  interviewed" sat eighth in a numbered list and was ignored live. Rewritten as an ADK
+  `InstructionProvider` that restates the in-flight challenge — title, outcome, progress —
+  as *fact* each turn. Rules compete. Facts don't.
+- **A feedback button that wrote to a table nobody read.** `record_feedback` had no reader
+  anywhere in the codebase, so "tell it what didn't work and the next one is different" was
+  false. It had gone unnoticed because the reason box was a native `window.prompt()`, which
+  blocks the page and every browser check driving it. An untestable control rots.
 
 ## Accomplishments we're proud of
 
@@ -114,7 +136,15 @@ don't call a model — which is the actual lesson.
   Vercel instead"* — attributed, unprompted.
 - A blocker re-opening the interview and **redrawing the graph around the constraint**,
   then building new tools for the new plan.
-- **52 tests**, including a regression test for every bug above.
+- A second person opening an invite link **inherits the party's knowledge and adds to
+  it**, with the header roster going 1 → 2 on the first person's screen while they sit
+  still. Driven through two separate browser contexts, not two tabs — tabs share
+  `localStorage` and would have let three real bugs pass.
+- **74 tests plus six browser-driven checks**, including a regression test for every bug
+  above. The checks click the actual controls and read the clipboard, the iframe and the
+  resulting prompt string back — `check_feedback.py` follows a thumbs-down all the way
+  into the Quartermaster's instruction, because "the loop is closed" and "the loop is
+  open" look identical from outside.
 
 ## What we learned
 
@@ -127,6 +157,17 @@ The second lesson: when output is wrong, check whether the *data* the model need
 exists before rewriting the prompt. Attribution failed not because the instruction was
 weak but because the journal recorded `"Archivist"` as the actor — the user's name was
 never stored anywhere.
+
+The third arrived late and cost the most: **a request that cannot fail cannot teach you
+anything.** A session payload shaped one level too deep returned `200 OK` for weeks and
+produced three symptoms that looked like three different bugs — a routing bug, a memory
+bug, and a permissions bug. One malformed body. What finally exposed it was refusing to
+accept an agent's word that it had saved something, and printing the tool calls the UI
+actually recorded next to the sentence the agent said.
+
+The fourth: **a control nobody can automate is a control nobody notices has died.** The
+feedback button spent months writing rows that no code read, and the thing protecting it
+from discovery was a `window.prompt()` that no browser test could get past.
 
 ## What's next
 
