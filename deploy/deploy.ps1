@@ -89,6 +89,10 @@ $envVars = @(
 ) -join ","
 
 Write-Host "==> Deploying $Service" -ForegroundColor Cyan
+# --session-affinity keeps one conversation on one instance, which saves re-reading
+# every event from Firestore on every turn. It is NOT what makes sessions survive:
+# Cloud Run drops affinity the moment an instance goes away, which is exactly when
+# durability has to carry it. That is services/session_store.py's job.
 & $gcloud run deploy $Service `
     --source . `
     --region $Region `
@@ -98,6 +102,7 @@ Write-Host "==> Deploying $Service" -ForegroundColor Cyan
     --timeout 3600 `
     --min-instances $minInstances `
     --max-instances 10 `
+    --session-affinity `
     --set-env-vars $envVars
 
 # gcloud is a native executable, and PowerShell does NOT throw on a non-zero exit from

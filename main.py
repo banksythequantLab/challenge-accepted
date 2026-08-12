@@ -17,15 +17,33 @@ from google.adk.cli.fast_api import get_fast_api_app
 
 from challenge_accepted import config
 from challenge_accepted.api import router as api_router
+from challenge_accepted.services import session_store
 
 AGENTS_DIR = str(Path(__file__).parent)
 
 
 def _session_uri() -> str | None:
-    """Vertex AI Sessions in production so Cloud Run can scale to zero safely."""
+    """Where conversations live.
+
+    Agent Engine when one exists; otherwise our own Firestore-backed service, which is
+    registered under the `firestore://` scheme via ADK's service registry.
+
+    NOT None. Passing None looks like "use the default" and reads as harmless, but ADK
+    then falls back to per-agent SQLite under `<agents_dir>/<agent>/.adk/`. On Cloud
+    Run that file is per-instance and ephemeral: with max-instances=10 and no session
+    affinity, a judge's second message can land on an instance that has never heard of
+    their session. The dashboard rebuilds it, so nothing errors -- the conversation
+    history just vanishes and the interview starts over. Silent amnesia is worse than
+    a visible failure, and it is the failure mode most likely to happen to someone
+    else, on a laptop we are not watching.
+
+    With no GOOGLE_CLOUD_PROJECT the store falls back to its in-memory dict, so local
+    development and the test suite exercise this same path with zero GCP setup.
+    """
     if config.use_vertex():
         return f"agentengine://{config.AGENT_ENGINE_ID}"
-    return None
+    session_store.register()
+    return "firestore://sessions"
 
 
 def _memory_uri() -> str | None:

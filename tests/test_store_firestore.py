@@ -26,7 +26,10 @@ from challenge_accepted.services.store import Store
 
 
 class FakeSnapshot:
-    def __init__(self, data: dict[str, Any] | None) -> None:
+    #: `reference` exists because delete_where() streams a query and deletes each hit
+    #: through its reference -- which is what the real client library prescribes.
+    def __init__(self, data: dict[str, Any] | None, reference: Any = None) -> None:
+        self.reference = reference
         self._data = data
 
     @property
@@ -52,13 +55,16 @@ class FakeDocument:
     def get(self) -> FakeSnapshot:
         return FakeSnapshot(self._collection.docs.get(self._id))
 
+    def delete(self) -> None:
+        self._collection.docs.pop(self._id, None)
+
 
 class FakeQuery:
-    def __init__(self, rows: list[dict[str, Any]]) -> None:
-        self._rows = rows
+    def __init__(self, snaps: list[FakeSnapshot]) -> None:
+        self._snaps = snaps
 
     def stream(self):
-        return [FakeSnapshot(r) for r in self._rows]
+        return list(self._snaps)
 
 
 class FakeCollection:
@@ -80,10 +86,13 @@ class FakeCollection:
         # proto-plus wraps the value; string_value is empty-string when unset, which is
         # fine here because every field Store filters on is a non-empty string id.
         field, wanted = pb.field.field_path, pb.value.string_value
-        return FakeQuery([d for d in self.docs.values() if d.get(field) == wanted])
+        return FakeQuery([
+            FakeSnapshot(d, FakeDocument(self, k))
+            for k, d in self.docs.items() if d.get(field) == wanted
+        ])
 
     def stream(self):
-        return [FakeSnapshot(d) for d in self.docs.values()]
+        return [FakeSnapshot(d, FakeDocument(self, k)) for k, d in self.docs.items()]
 
 
 class FakeFirestore:
@@ -216,3 +225,42 @@ def test_tools_are_queryable_by_challenge(store: Store):
     assert len(tools) == 1
     assert tools[0]["node_id"] == "n1"
     assert tools[0]["challenge_id"] == cid
+
+
+# --- session storage --------------------------------------------------------
+# `sessions` and `session_events` exist because ADK, with session_service_uri=None,
+# writes conversations to per-agent SQLite on the instance's own disk -- see
+# services/session_store.py. delete() and delete_where() have no other caller in the
+# codebase, so without these they would ship to Firestore entirely unexecuted, which
+# is precisely the mistake this file was written to stop repeating.
+
+
+def test_delete_removes_the_document(store: Store):
+    store._put("sessions", "app|u|s", {"id": "s", "app_name": "app"})
+    assert store.get("sessions", "app|u|s") is not None
+
+    store.delete("sessions", "app|u|s")
+
+    assert store.get("sessions", "app|u|s") is None
+
+
+def test_delete_is_silent_on_a_missing_document(store: Store):
+    """Deleting a session ADK never wrote must not raise -- the dashboard DELETEs
+    optimistically when it decides a session is stale."""
+    store.delete("sessions", "never-existed")
+
+
+def test_delete_where_removes_only_the_matching_session(store: Store):
+    for n in range(3):
+        store._put("session_events", f"mine|{n}", {"session_key": "mine", "n": n})
+    store._put("session_events", "theirs|0", {"session_key": "theirs", "n": 0})
+
+    gone = store.delete_where("session_events", "session_key", "mine")
+
+    assert gone == 3
+    assert store._query("session_events", "session_key", "mine") == []
+    assert len(store._query("session_events", "session_key", "theirs")) == 1
+
+
+def test_delete_where_matching_nothing_is_zero_not_an_error(store: Store):
+    assert store.delete_where("session_events", "session_key", "nobody") == 0

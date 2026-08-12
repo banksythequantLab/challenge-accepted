@@ -35,7 +35,8 @@ Built for the [All Things Agentic hackathon](https://allthingsagentichackathon.d
 | Verified live | The dashboard **drives** the agents: chat panel opens an ADK session, streams `/run_sse`, and renders text, tool calls and code execution as they happen. One scripted browser run: 15 quest nodes drawn, 4 tools forged, title auto-filled, zero console errors |
 | Verified | Losing the session mid-conversation (deleted server-side, exactly as a Cloud Run restart does) recovers without a reload -- `scripts\check_session_recovery.py` |
 | Verified | Every copy-to-clipboard path returns the right markdown, on desktop and on an iPhone 13 viewport -- `scripts\check_copy.py` reads the clipboard back and asserts on content |
-| Not built | Vertex AI Memory Bank and Agent Engine Sessions. `use_vertex()` is false; sessions are per-instance and in memory. See Known issues |
+| Built | Conversations persist in Firestore via a custom `BaseSessionService`, registered under a `firestore://` scheme through ADK's own service registry. Survives an instance swap and a redeploy |
+| Not built | Vertex AI Memory Bank. `use_vertex()` is false. See Known issues |
 | Not built | Firebase Auth. Users are anonymous ids in `localStorage` |
 
 Reproduce with `python scripts\live_walk.py` (costs ~$0.86, prints full token accounting).
@@ -245,11 +246,51 @@ checklist rather than blocking the graph.
 
 ## Known issues
 
-### Memory Bank and Agent Engine Sessions are not wired, and the diagram now says so
+### Fixed: conversations lived on the instance that started them
 
-`main.py` switches both the session service and the memory service to
-`agentengine://{AGENT_ENGINE_ID}` the moment `use_vertex()` is true. No Agent Engine has
-been created, so today it is false: sessions live in the server's memory, per instance.
+I had been writing, in this file, that "sessions live in the server's memory". That was
+wrong in the detail and right in the consequence, which is the worst way to be wrong.
+With `session_service_uri=None` ADK does **not** use an in-memory service — it falls
+back to **per-agent SQLite** under `<agents_dir>/<agent>/.adk/`. Same outcome on Cloud
+Run: that file is per-instance and ephemeral.
+
+Two failure modes follow, and both land squarely in a seven-week judging window:
+
+* `max-instances=10` with no session affinity means a judge's *second message* can be
+  routed to an instance that has never heard of their session. The dashboard notices
+  and rebuilds it, so nothing errors — the conversation history simply vanishes and the
+  Interviewer starts over. **Silent amnesia is worse than a visible failure.**
+* Any redeploy or instance recycle loses every in-flight conversation.
+
+`challenge_accepted/services/session_store.py` is a `BaseSessionService` backed by the
+same Firestore as everything else, registered under a `firestore://` scheme through
+ADK's own service registry — the documented extension point, not a monkey-patch.
+Events live in their own collection rather than an array on the session document:
+Firestore caps a document at 1 MiB and appending to an array rewrites the whole
+document each time, which is O(n²) bytes written over a conversation.
+
+`--session-affinity` is now set too, but it is an *optimisation*, not the fix. Cloud Run
+drops affinity the moment an instance goes away — which is exactly when durability has
+to carry it.
+
+**The trap this hid.** The first version put the Firestore writes on
+`asyncio.to_thread`, for the obvious reason that a blocking client should not sit on the
+event loop. It passed 91 unit tests and every browser check except the one driving a
+real FORGE turn, which died mid-stream: `ERR_INCOMPLETE_CHUNKED_ENCODING` in the
+browser, an ASGI exception group terminating in `GeneratorExit`, and a wall of
+OpenTelemetry "Failed to detach context". ADK runs agents as nested async generators
+wrapped in `Aclosing`, and `append_event` is called from inside them — a thread hop is a
+real suspension point, so the loop interleaved teardown with the write and closed the
+generator underneath it. The user's agents stopped halfway through building their tools.
+
+The writes are synchronous now, deliberately, with a test that drives the coroutine by
+hand and fails if it ever yields. Reads keep their thread hop: they are called from
+ordinary request handlers, not from inside a generator.
+
+### Memory Bank is not wired, and the diagram now says so
+
+`main.py` switches the memory service to `agentengine://{AGENT_ENGINE_ID}` the moment
+`use_vertex()` is true. No Agent Engine has been created, so today it is false.
 
 The architecture diagram used to draw Memory Bank, Agent Sessions and a persistent
 Agent Engine code sandbox as though all three were running. They were not. Those cards
@@ -260,10 +301,11 @@ is one static HTML file with anonymous ids in `localStorage`, and it says that n
 
 A diagram that describes what you wish you had built is worth less than no diagram.
 
-**The user-visible consequence** is that a Cloud Run restart destroys in-flight sessions.
-Judging runs for weeks, and instances *will* recycle in that window, so the dashboard
-now detects a session the server has never heard of, rebuilds it, and retries the turn
-once — no reload, no lost conversation. `scripts\check_session_recovery.py` proves it by
+**The client-side belt to that braces.** Even with durable sessions, a client can hold
+an id the server will not honour — a wiped collection, a session deleted out from
+under it. The dashboard detects a session the server has never heard of, rebuilds it,
+and retries the turn once — no reload, no lost conversation.
+`scripts\check_session_recovery.py` proves it by
 deleting the session out from under a live page and requiring the next turn to succeed.
 
 ### Fixed: the whole read side froze while the agents worked

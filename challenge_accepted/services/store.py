@@ -102,6 +102,10 @@ class Store:
             "journal": {},
             "feedback": {},
             "groups": {},
+            # ADK conversations. See services/session_store.py for why these live here
+            # rather than in the per-instance SQLite file ADK defaults to.
+            "sessions": {},
+            "session_events": {},
         }
         if client is None and config.use_firestore():
             try:  # pragma: no cover - requires GCP creds
@@ -325,6 +329,32 @@ class Store:
             return
         with self._lock:
             self._mem[collection].setdefault(doc_id, {}).update(patch)
+
+    def delete(self, collection: str, doc_id: str) -> None:
+        if self._client:
+            self._client.collection(collection).document(doc_id).delete()
+            return
+        with self._lock:
+            self._mem[collection].pop(doc_id, None)
+
+    def delete_where(self, collection: str, field: str, value: Any) -> int:
+        """Delete every document matching one field. Returns how many went.
+
+        Used to drop a session's events when the session is deleted. Firestore has no
+        server-side "delete by query", so this is a read then a batch of deletes --
+        which is exactly what the client library's own docs prescribe.
+        """
+        if self._client:
+            col = self._client.collection(collection)
+            docs = list(col.where(filter=self._field_filter(field, value)).stream())
+            for d in docs:
+                d.reference.delete()
+            return len(docs)
+        with self._lock:
+            gone = [k for k, v in self._mem[collection].items() if v.get(field) == value]
+            for k in gone:
+                del self._mem[collection][k]
+            return len(gone)
 
     def _query(self, collection: str, field: str, value: Any) -> list[dict[str, Any]]:
         if self._client:
