@@ -700,11 +700,37 @@ docs/                 plan + architecture diagram
    Firestore. (Sessions no longer wait on this: they run on our own Firestore-backed
    `BaseSessionService`.)
 2. Firebase Auth, replacing the anonymous `localStorage` ids.
-3. **Map `challengeaccepted.app`.** Blocked on domain verification, not on code:
-   `gcloud domains list-user-verified` does not list it for this account, so Cloud Run
-   will refuse the mapping. The step is verifying ownership in Google Search Console
-   (a TXT record at the registrar); after that the mapping is one command. Until then
-   the Cloud Run URL is the only address worth putting on camera — and
+3. **Map `challengeaccepted.app`.** Blocked on domain verification, not on code. The
+   mapping resource now exists in `us-central1` and reports exactly what it is waiting
+   for:
+
+   ```
+   Ready=False  reason=PermissionDenied
+   Caller is not authorized to administer the domain challengeaccepted.app.
+   ```
+
+   DNS for the domain is on Cloudflare (`dalary`/`kolton.ns.cloudflare.com`) and the zone
+   is empty -- no A, AAAA, CNAME or TXT at the apex. `gcloud domains list-user-verified`
+   returns 15 domains and this is not one of them, so Cloud Run will not make the domain
+   routable and will not provision a certificate.
+
+   Three steps remain, and only the first needs a human:
+
+   1. In Google Search Console, add a **Domain** property for `challengeaccepted.app`,
+      copy the `google-site-verification=...` TXT value, add it at the Cloudflare apex,
+      then Verify. Verifying the apex covers `www` and every other subdomain.
+   2. Re-read the mapping; `status.resourceRecords` then carries the A/AAAA records to
+      add. Read them from the API rather than hard-coding them from memory.
+   3. Add those records in Cloudflare as **DNS only** (grey cloud). Google's managed
+      certificate cannot be issued through Cloudflare's proxy, and leaving the proxy off
+      also keeps the agent event stream unbuffered.
+
+   The obvious Cloudflare-side shortcut -- a proxied CNAME plus an Origin Rule rewriting
+   the `Host` header to the `run.app` hostname -- does not apply: Host header override,
+   SNI override and DNS record override are all Enterprise-only. A Worker would work on a
+   free plan, but it puts a proxy in front of an SSE stream for no gain over DNS-only.
+
+   Until this lands, the Cloud Run URL is the only address worth putting on camera -- and
    `docs\DEMO_SCRIPT.md` says so.
 
 ---
