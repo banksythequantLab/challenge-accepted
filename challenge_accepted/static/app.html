@@ -598,8 +598,10 @@ async function send() {
         }
       }
     }
+    // relist: the turn may have created a quest that is not in the picker yet. This is
+    // the moment we learn that, which is why the poll does not have to keep asking.
     await adoptChallengeFromSession();
-    await refresh();
+    await refresh(true);
   } catch (e) {
     thinking.remove();
     bubble('act', null, '✖ ' + e.message);
@@ -1046,7 +1048,7 @@ async function pickChallenge() {
   else p.selectedIndex = -1;
 
   p.onchange = () => { challengeId = p.value; selected = null; lastJournal = -1;
-                       sessionId = null; rememberChallenge(challengeId);
+                       sessionId = null; joined = null; rememberChallenge(challengeId);
                        history.replaceState(null,'','?id='+challengeId);
                        refresh(); };
   return challenges.length > 0;
@@ -1091,9 +1093,13 @@ async function joinParty() {
   } catch (e) { joined = null; console.error(e); }
 }
 
-async function refresh() {
+//: The quest list changes when someone creates a quest -- which is a thing we are told
+//: about, not something worth asking every 1.2 seconds. Re-listing on every poll cost a
+//: full challenges scan each time, and the picker never even rendered the result twice.
+let listedOnce = false;
+async function refresh(relist) {
   try {
-    await pickChallenge();
+    if (relist || !listedOnce) { await pickChallenge(); listedOnce = true; }
     await joinParty();
     if (!challengeId) {
       drawGraph({ nodes: [], edges: [] });
@@ -1101,12 +1107,10 @@ async function refresh() {
       $('title').textContent = 'no quest yet — say what you want to make happen';
       return;
     }
-    const [s, g, j, t] = await Promise.all([
-      api(`/challenges/${challengeId}`),
-      api(`/challenges/${challengeId}/graph`),
-      api(`/challenges/${challengeId}/journal`),
-      api(`/challenges/${challengeId}/tools`),
-    ]);
+    // ONE request. This was four, which meant four existence checks and a second pass
+    // over nodes and tools on every poll -- and the poll runs every 1.2s during a run.
+    const d = await api(`/challenges/${challengeId}/dashboard`);
+    const s = d.summary, g = d.graph, j = d.journal, t = d.tools;
     charter = s.charter || {};
     groupFacts = s.group_facts || [];
     toolsById = Object.fromEntries((t.tools || []).map(x => [x.id, x]));

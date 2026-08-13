@@ -112,6 +112,9 @@ python scripts\check_forge_ui.py        # replays a synthetic ADK stream; assert
                                         # worker lanes fill and the read side does NOT
                                         # freeze while the agents work
 python scripts\check_phone.py           # the whole app on an iPhone 13 with real taps
+python scripts\check_poll_cost.py       # counts Firestore round trips for ONE idle
+                                        # browser with 25 challenges in the store, and
+                                        # fails if the read path goes quadratic again
 python scripts\check_copy.py            # clicks every copy button and reads the
                                         # clipboard back, desktop and iPhone viewport
 python scripts\shoot_ui.py              # seeds demo data, screenshots the dashboard
@@ -307,6 +310,36 @@ under it. The dashboard detects a session the server has never heard of, rebuild
 and retries the turn once — no reload, no lost conversation.
 `scripts\check_session_recovery.py` proves it by
 deleting the session out from under a live page and requiring the next turn to succeed.
+
+### Fixed: an idle browser cost 570 Firestore reads a minute
+
+Making the map update live (below) turned the read path from an occasional cost into a
+standing one — every 4s idle, every 1.2s during a run, per open browser, for a
+seven-week judging window. So I measured it rather than assuming it was fine.
+`scripts\check_poll_cost.py` counts real Store round trips with 25 challenges in the
+store and one browser sitting still:
+
+```
+before   570 reads/min   (81 node queries in 12s)
+after     75 reads/min   (3)
+```
+
+Two causes:
+
+* **`/api/challenges` ran one node query per challenge** to compute a count the picker
+  never rendered. That grew linearly with every quest any previous visitor had created,
+  and it ran on every poll. Counts are now opt-in (`?counts=1`), the list is capped, and
+  the browser fetches it **once** — plus when a turn creates a quest, which is a thing
+  it gets told about rather than something worth asking 50 times a minute.
+* **The poll was four requests** — summary, graph, journal, tools — so four separate
+  existence checks and a second pass over nodes and tools. There is now one
+  `/dashboard` endpoint doing each read exactly once: five reads instead of twelve, and
+  one round trip instead of four on every frame of the animation this thing is judged
+  on. The four endpoints remain, and a test asserts `/dashboard` returns byte-identical
+  payloads — if they drift, the browser and the checks are testing different products.
+
+`get_journal` was also calling `list_journal` twice: once for the window, once to count
+the thing it had just fetched.
 
 ### Fixed: the whole read side froze while the agents worked
 

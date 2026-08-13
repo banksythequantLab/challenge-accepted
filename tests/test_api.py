@@ -145,3 +145,58 @@ def test_cyclic_dependencies_do_not_hang_the_layout(client: TestClient):
 
     graph = client.get(f"/api/challenges/{cid}/graph").json()
     assert len(graph["nodes"]) == 2
+
+
+# --- the polled read path ---------------------------------------------------
+# The dashboard asks for this every 4s idle and every 1.2s during a run, per open
+# browser, for the length of the judging window. Measured at 570 Firestore reads a
+# minute before these changes; scripts\check_poll_cost.py holds the line at 120.
+
+
+def test_the_dashboard_endpoint_matches_the_four_it_replaces(
+    client: TestClient, challenge: str
+):
+    """One round trip, byte-identical payloads. If these ever drift, the browser and
+    the checks are testing two different products."""
+    d = client.get(f"/api/challenges/{challenge}/dashboard").json()
+
+    assert d["summary"] == client.get(f"/api/challenges/{challenge}").json()
+    assert d["graph"] == client.get(f"/api/challenges/{challenge}/graph").json()
+    assert d["journal"] == client.get(f"/api/challenges/{challenge}/journal").json()
+    assert d["tools"] == client.get(f"/api/challenges/{challenge}/tools").json()
+
+
+def test_the_dashboard_endpoint_404s_on_an_unknown_challenge(client: TestClient):
+    """The UI's session-recovery path keys off the status code."""
+    assert client.get("/api/challenges/chal_nope/dashboard").status_code == 404
+
+
+def test_the_picker_does_not_count_nodes_unless_asked(client: TestClient, challenge: str):
+    """A node count nobody renders cost one Firestore query PER CHALLENGE, on every
+    poll, growing with every quest any previous visitor had created."""
+    rows = client.get("/api/challenges").json()["challenges"]
+    mine = next(c for c in rows if c["id"] == challenge)
+    assert "nodes" not in mine
+
+    counted = client.get("/api/challenges?counts=true").json()["challenges"]
+    assert next(c for c in counted if c["id"] == challenge)["nodes"] == 4
+
+
+def test_the_picker_is_capped(client: TestClient):
+    for i in range(8):
+        store.create_challenge({"title": f"q{i}"}, "u", "g_cap")
+    assert len(client.get("/api/challenges?limit=3").json()["challenges"]) == 3
+    assert client.get("/api/challenges?limit=0").json()["challenges"] == []
+
+
+def test_journal_total_counts_everything_not_just_the_window(
+    client: TestClient, challenge: str
+):
+    for i in range(5):
+        store.add_journal(challenge, {"actor": "coach", "kind": "note", "text": f"n{i}"})
+
+    body = client.get(f"/api/challenges/{challenge}/journal?limit=2").json()
+
+    assert len(body["entries"]) == 2
+    assert body["total"] == 6          # the fixture's one, plus five
+    assert body["entries"][-1]["text"] == "n4"

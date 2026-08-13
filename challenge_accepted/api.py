@@ -96,25 +96,37 @@ def healthz() -> dict[str, Any]:
 
 
 @router.get("/challenges")
-def list_challenges(group_id: Optional[str] = None) -> dict[str, Any]:
-    """All challenges, newest first. The UI uses this to pick one with no query string."""
-    rows = store.list_challenges(group_id)
-    return {
-        "challenges": [
-            {
-                "id": c.get("id"),
-                "title": (c.get("charter") or {}).get("title") or "Untitled challenge",
-                "outcome": (c.get("charter") or {}).get("outcome", ""),
-                "group_id": c.get("group_id"),
-                "created_at": c.get("created_at"),
-                "nodes": len([
-                    n for n in store.list_nodes(str(c.get("id")))
-                    if n.get("status") != "superseded"
-                ]),
-            }
-            for c in rows
-        ]
-    }
+def list_challenges(
+    group_id: Optional[str] = None,
+    limit: int = 50,
+    counts: bool = False,
+) -> dict[str, Any]:
+    """Challenges, newest first. This fills the quest picker.
+
+    `counts` is OFF by default, and that is the whole point. This endpoint used to
+    compute a node count for every challenge unconditionally -- one Firestore query
+    each -- for a number the picker never rendered. Measured with 25 challenges in the
+    store and a single idle browser, that was 81 node queries in 12 seconds, and it grew
+    linearly with every quest any previous visitor had ever created.
+    `scripts\\check_poll_cost.py` fails the build if it comes back.
+    """
+    rows = store.list_challenges(group_id)[:max(0, limit)]
+    out = []
+    for c in rows:
+        row = {
+            "id": c.get("id"),
+            "title": (c.get("charter") or {}).get("title") or "Untitled challenge",
+            "outcome": (c.get("charter") or {}).get("outcome", ""),
+            "group_id": c.get("group_id"),
+            "created_at": c.get("created_at"),
+        }
+        if counts:
+            row["nodes"] = len([
+                n for n in store.list_nodes(str(c.get("id")))
+                if n.get("status") != "superseded"
+            ])
+        out.append(row)
+    return {"challenges": out}
 
 
 @router.get("/challenges/{challenge_id}")
@@ -164,13 +176,24 @@ def join_challenge(challenge_id: str, body: JoinIn) -> dict[str, Any]:
 def get_graph(challenge_id: str, include_superseded: bool = False) -> dict[str, Any]:
     """React Flow nodes and edges, laid out by dependency depth."""
     _challenge_or_404(challenge_id)
-    raw = store.list_nodes(challenge_id)
+    return _build_graph(store.list_nodes(challenge_id),
+                        store.list_tools(challenge_id),
+                        include_superseded)
+
+
+def _build_graph(raw: list[dict[str, Any]], all_tools: list[dict[str, Any]],
+                 include_superseded: bool = False) -> dict[str, Any]:
+    """Layout from ALREADY-FETCHED rows.
+
+    Split out so `/dashboard` can build the graph from the same nodes and tools it
+    already read for the summary, instead of querying them a second time.
+    """
     if not include_superseded:
         raw = [n for n in raw if n.get("status") != "superseded"]
     by_id = {n["id"]: n for n in raw}
 
     tools_by_node: dict[str, list[dict[str, Any]]] = {}
-    for tool in store.list_tools(challenge_id):
+    for tool in all_tools:
         tools_by_node.setdefault(str(tool.get("node_id")), []).append({
             "id": tool.get("id"),
             "name": tool.get("name"),
@@ -219,8 +242,51 @@ def get_graph(challenge_id: str, include_superseded: bool = False) -> dict[str, 
 def get_journal(challenge_id: str, limit: int = 100) -> dict[str, Any]:
     """The 'takes notes' surface. Newest last, so the UI can append and autoscroll."""
     _challenge_or_404(challenge_id)
-    entries = store.list_journal(challenge_id)[-limit:]
-    return {"entries": entries, "total": len(store.list_journal(challenge_id))}
+    # One read. This used to call list_journal twice -- once for the window, once to
+    # count -- which is two Firestore queries for a number you already have.
+    entries = store.list_journal(challenge_id)
+    return {"entries": entries[-limit:], "total": len(entries)}
+
+
+@router.get("/challenges/{challenge_id}/dashboard")
+def get_dashboard(challenge_id: str, journal_limit: int = 100) -> dict[str, Any]:
+    """Everything the dashboard polls for, in ONE round trip.
+
+    The UI needs the summary, the graph, the journal and the tools together, and it
+    asks every 1.2s during a run. Fetching them as four requests meant four separate
+    `_challenge_or_404` reads and a second pass over nodes and tools -- twelve Firestore
+    reads per poll where five will do, plus four round trips of latency on every frame
+    of the one animation this product is judged on.
+
+    The four endpoints stay: they are a clearer API to read, and the checks use them.
+    This is what the browser uses.
+    """
+    challenge = _challenge_or_404(challenge_id)
+    group = store.get("groups", str(challenge.get("group_id", ""))) or {}
+    nodes = store.list_nodes(challenge_id)
+    tools = store.list_tools(challenge_id)
+    journal = store.list_journal(challenge_id)
+    live = [n for n in nodes if n.get("status") != "superseded"]
+
+    return {
+        "summary": {
+            "id": challenge_id,
+            "charter": challenge.get("charter", {}),
+            "status": challenge.get("status"),
+            "owner_id": challenge.get("owner_id"),
+            "group_id": challenge.get("group_id"),
+            "counts": {
+                "nodes": len(live),
+                "done": len([n for n in live if n.get("status") == "done"]),
+                "tools": len(tools),
+            },
+            "group_facts": group.get("shared_facts", []),
+            "party": group.get("members", []),
+        },
+        "graph": _build_graph(nodes, tools),
+        "journal": {"entries": journal[-journal_limit:], "total": len(journal)},
+        "tools": {"tools": tools},
+    }
 
 
 @router.get("/challenges/{challenge_id}/tools")
