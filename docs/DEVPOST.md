@@ -140,7 +140,7 @@ don't call a model — which is the actual lesson.
   it**, with the header roster going 1 → 2 on the first person's screen while they sit
   still. Driven through two separate browser contexts, not two tabs — tabs share
   `localStorage` and would have let three real bugs pass.
-- **97 tests plus eleven browser-driven checks**, including a regression test for every bug
+- **97 tests plus thirteen browser-driven checks**, including a regression test for every bug
   above. The checks click the actual controls and read the clipboard, the iframe and the
   resulting prompt string back — `check_feedback.py` follows a thumbs-down all the way
   into the Quartermaster's instruction, because "the loop is closed" and "the loop is

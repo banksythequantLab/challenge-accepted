@@ -25,12 +25,12 @@ Built for the [All Things Agentic hackathon](https://allthingsagentichackathon.d
 |---|---|
 | Verified live | 8-turn interview -> charter saved -> 12-node DAG -> 6 tools built, smoke-tested and persisted |
 | Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
-| Verified | 97 tests pass against a real ADK `Runner`, plus 11 browser-driven checks that click the actual controls; FastAPI boots, `/api/healthz` 200 |
+| Verified | 97 tests pass against a real ADK `Runner`, plus 13 browser-driven checks that click the actual controls; FastAPI boots, `/api/healthz` 200 |
 | Measured | One full challenge (12 nodes, 6 tools) = **243k prompt / 66k billed output, ~$0.86**. Break-even at $29/seat ≈ **34 challenges/user/month** |
 | Fixed | The "exactly 4 tools" ceiling. Two causes, both live-only. See Known issues. |
 | Verified live | CLIMB end to end: node closed on evidence, feedback captured with reason, blocker -> group fact -> interview re-opened -> graph redrawn around the constraint |
 | Verified live | **Two users, one challenge.** Dana joins a session Derek started; her Coach opens with *"Derek found Cloud Run requires billing... so we're using Render and Vercel instead"* and hands her a ready node. This is the demo beat |
-| Not verified | That a joining teammate is never offered an already-`done` node. The check exists but was vacuous -- Derek hit a blocker rather than completing anything in that script |
+| Verified | **A joining teammate is handed live work, not finished work.** This row said *Not verified* for weeks. `scripts\check_handoff.py` now drives it: Dana joins cold on a challenge with two closed nodes and asks what to pick up. She gets both party facts (one attributed to Derek by name) and is pointed at an open node; neither finished node is named |
 | Verified live | **Deployed to Cloud Run**, Firestore-backed (`store=firestore`), agents served from Vertex AI. Gemini 3.x lives on the Vertex **global** endpoint, not a regional one |
 | Verified live | The dashboard **drives** the agents: chat panel opens an ADK session, streams `/run_sse`, and renders text, tool calls and code execution as they happen. One scripted browser run: 15 quest nodes drawn, 4 tools forged, title auto-filled, zero console errors |
 | Verified | Losing the session mid-conversation (deleted server-side, exactly as a Cloud Run restart does) recovers without a reload -- `scripts\check_session_recovery.py` |
@@ -112,6 +112,9 @@ python scripts\check_forge_ui.py        # replays a synthetic ADK stream; assert
                                         # worker lanes fill and the read side does NOT
                                         # freeze while the agents work
 python scripts\check_phone.py           # the whole app on an iPhone 13 with real taps
+python scripts\check_handoff.py         # a teammate joins cold and asks what to do;
+                                        # fails if the Coach leads with a node that
+                                        # was already finished before she arrived
 python scripts\check_a11y.py            # tabs the quest map, opens a tool with Enter,
                                         # and computes contrast from rendered colours
 python scripts\check_errors.py          # 429, 500, a stream that dies halfway, and one
@@ -697,9 +700,12 @@ docs/                 plan + architecture diagram
    Firestore. (Sessions no longer wait on this: they run on our own Firestore-backed
    `BaseSessionService`.)
 2. Firebase Auth, replacing the anonymous `localStorage` ids.
-3. Close the "joining teammate is never offered a `done` node" gap in the Status table
-   -- the check exists but has never been exercised by a run that actually completed one.
-4. Map `challengeaccepted.app` to the Cloud Run service.
+3. **Map `challengeaccepted.app`.** Blocked on domain verification, not on code:
+   `gcloud domains list-user-verified` does not list it for this account, so Cloud Run
+   will refuse the mapping. The step is verifying ownership in Google Search Console
+   (a TXT record at the registrar); after that the mapping is one command. Until then
+   the Cloud Run URL is the only address worth putting on camera — and
+   `docs\DEMO_SCRIPT.md` says so.
 
 ---
 
