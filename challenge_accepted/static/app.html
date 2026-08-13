@@ -128,6 +128,13 @@
   .byline{color:var(--gold);font-weight:700;margin-right:7px;
     font-size:9.5px;letter-spacing:.06em;text-transform:uppercase}
 
+  /* A failed run is not a status code. It needs to say what happened, whether any of
+     it stuck, and offer the way forward. */
+  .msg.act.err{border-color:var(--blocked);border-style:solid;color:#FFC9C9;
+    max-width:100%;font-family:inherit;font-size:12.5px;padding:10px 12px}
+  .msg.act.err .wait{display:block;color:var(--dim);margin:6px 0 9px;font-size:11.5px}
+  .msg.act.err button{font-size:12px}
+
   .why{display:flex;gap:6px;margin-top:8px}
   .why input{flex:1;min-width:0;background:var(--panel);color:var(--ink);
     border:1px solid var(--line);border-radius:7px;padding:6px 9px;font:inherit;
@@ -545,13 +552,21 @@ const forge = {
 };
 
 // Streams /run_sse and renders each agent event as it arrives.
-async function send() {
-  const text = $('input').value.trim();
+//: `retryText` re-sends a turn that failed, without making the user retype the message
+//: they watched vanish into the transcript.
+async function send(retryText) {
+  // Belt as well as braces: anything that is not a string is not a retry. Wiring this
+  // straight to an onclick hands it a MouseEvent, and `.trim()` on that is a TypeError
+  // that eats the whole turn -- including the error handler meant to report it.
+  const text = (typeof retryText === 'string' ? retryText : $('input').value).trim();
   if (!text || busy) return;
   busy = true; $('send').disabled = true;
-  $('input').value = ''; $('input').style.height = 'auto';
+  if (typeof retryText !== 'string') { $('input').value = ''; $('input').style.height = 'auto'; }
   bubble('me', null, text);
   forge.reset();
+  //: Did ANY agent event arrive before it broke? That is the difference between
+  //: "nothing happened" and "some of it did and is on the map".
+  let streamed = false;
 
   const thinking = bubble('bot', 'working',
     '');
@@ -575,6 +590,7 @@ async function send() {
         const line = chunk.split('\n').find(l => l.startsWith('data:'));
         if (!line) continue;
         let ev; try { ev = JSON.parse(line.slice(5).trim()); } catch { continue; }
+        streamed = true;
         for (const p of (ev.content?.parts || [])) {
           // An empty Toolwright slot is instructed to say "idle" and stop. That is the
           // right thing for the agent to do and the wrong thing to put on screen: the
@@ -604,10 +620,56 @@ async function send() {
     await refresh(true);
   } catch (e) {
     thinking.remove();
-    bubble('act', null, '✖ ' + e.message);
+    showFailure(e, text, streamed);
   } finally {
     busy = false; $('send').disabled = false; $('input').focus();
   }
+}
+
+// ------------------------------------------------------------------- failures
+// A run WILL fail during a seven-week judging window: Gemini rate-limits, Cloud Run
+// recycles, wifi drops. What the user got before was a dashed chip reading
+// "run_sse 429" -- a status code, no idea whether their work survived, and no way
+// forward but retyping the message they just watched disappear.
+
+//: Say what happened, in a sentence a person can act on.
+function explainError(e) {
+  const m = String(e && e.message || e);
+  const code = (m.match(/\b(4\d\d|5\d\d)\b/) || [])[1];
+  if (code === '429')
+    return "Gemini is rate-limiting us. Give it a few seconds, then try again.";
+  if (code === '401' || code === '403')
+    return "The server refused the request. If this is the deployed app, its "
+         + "credentials may have expired.";
+  if (code && code.startsWith('5'))
+    return "The server errored out.";
+  if (/failed to fetch|networkerror|load failed|network error/i.test(m))
+    return "Lost the connection to the server.";
+  return m;
+}
+
+//: `streamed` says whether any agent event arrived before it broke. That is the
+//: difference between "nothing happened" and "some of it happened and is on the map",
+//: and it is the first thing a person wants to know.
+function showFailure(e, text, streamed) {
+  const d = bubble('act', null, '');
+  d.classList.add('err');
+  const body = d.querySelector('.body');
+  body.textContent = '✖ ' + explainError(e) + ' ';
+  const note = document.createElement('div');
+  note.className = 'wait';
+  note.textContent = streamed
+    ? 'The agents had started — whatever they saved is on the map. The rest did not happen.'
+    : 'Nothing was saved, so nothing is half-done.';
+  body.appendChild(note);
+
+  const again = document.createElement('button');
+  again.className = 'send';
+  again.id = 'retry';
+  again.textContent = 'Try again';
+  again.onclick = () => { again.disabled = true; send(text); };
+  body.appendChild(again);
+  $('chatlog').scrollTop = $('chatlog').scrollHeight;
 }
 
 // The Interviewer writes challenge_id into session state once the charter is saved.
@@ -637,7 +699,9 @@ $('copyall').onclick = () => {
   copyText((head ? `# ${head}\n\n` : '') + out.join('\n\n'), $('copyall'));
 };
 
-$('send').onclick = send;
+//: NOT `= send`. An onclick handler is called with the MouseEvent, which would arrive
+//: as send()'s retry-text argument and blow up on .trim().
+$('send').onclick = () => send();
 $('input').addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
 });
@@ -1093,6 +1157,15 @@ async function joinParty() {
   } catch (e) { joined = null; console.error(e); }
 }
 
+function setLive(ok) {
+  const dot = $('live');
+  dot.style.color = ok ? 'var(--done)' : 'var(--blocked)';
+  dot.textContent = ok ? '●' : '⚠';
+  dot.title = ok ? 'Connected' : 'Cannot reach the server — still retrying';
+  // The word under the dot is the part that actually communicates.
+  dot.nextElementSibling.textContent = ok ? 'live' : 'offline';
+}
+
 //: The quest list changes when someone creates a quest -- which is a thing we are told
 //: about, not something worth asking every 1.2 seconds. Re-listing on every poll cost a
 //: full challenges scan each time, and the picker never even rendered the result twice.
@@ -1135,9 +1208,12 @@ async function refresh(relist) {
     const typing = $('detail').contains(document.activeElement)
                    && document.activeElement.tagName === 'INPUT';
     if (selected && !typing) showQuest(g.nodes.find(n => n.id === selected));
-    $('live').style.color = 'var(--done)';
+    setLive(true);
   } catch (e) {
-    $('live').style.color = 'var(--blocked)';
+    // A dot changing colour is not a message. It is also the entire signal for a
+    // colour-blind user, and it was the ONLY thing that happened when the read API
+    // stopped answering -- so a stale map looked exactly like a quiet one.
+    setLive(false);
     console.error(e);
   }
 }

@@ -112,6 +112,10 @@ python scripts\check_forge_ui.py        # replays a synthetic ADK stream; assert
                                         # worker lanes fill and the read side does NOT
                                         # freeze while the agents work
 python scripts\check_phone.py           # the whole app on an iPhone 13 with real taps
+python scripts\check_errors.py          # 429, 500, a stream that dies halfway, and one
+                                        # that recovers -- asserts each says what
+                                        # happened, whether work survived, and offers
+                                        # Try again with the message still in hand
 python scripts\check_poll_cost.py       # counts Firestore round trips for ONE idle
                                         # browser with 25 challenges in the store, and
                                         # fails if the read path goes quadratic again
@@ -310,6 +314,40 @@ under it. The dashboard detects a session the server has never heard of, rebuild
 and retries the turn once — no reload, no lost conversation.
 `scripts\check_session_recovery.py` proves it by
 deleting the session out from under a live page and requiring the next turn to succeed.
+
+### Fixed: a failed run showed you a status code and nothing else
+
+Over seven weeks of judging a run *will* fail — Gemini rate-limits, an instance
+recycles mid-stream, hotel wifi drops. What you got was a dashed chip reading
+`✖ run_sse 429`: a status code, no idea whether your work survived, and no way forward
+but retyping the message you had just watched scroll into the transcript.
+
+Now each failure says what happened, **whether any of it stuck**, and offers Try again
+with the original message still in hand. That middle part is the one that matters: the
+client tracks whether any agent event arrived before the break, so a mid-stream death
+says *"the agents had started — whatever they saved is on the map"* while a pre-stream
+429 says *"nothing was saved, so nothing is half-done."* The agent messages that did
+arrive stay on screen rather than being wiped.
+
+The connection indicator also had a real problem: a dot changing from green to red was
+the **entire** signal, which is nothing at all to a colour-blind user, and it meant a
+stale map looked exactly like a quiet one. The label under it now reads `live` /
+`offline`.
+
+`scripts\check_errors.py` drives four scenarios against a fake server that returns
+exactly the failure it is named after — 429, 500, a stream that dies halfway, and one
+that recovers on retry.
+
+**Two things that check found immediately.** First, `$('send').onclick = send` — an
+onclick handler is called with the MouseEvent, which arrived as the new retry-text
+argument and threw on `.trim()`, eating the whole turn *including the error handler
+meant to report it*. Second, the first version of the "recovers" scenario failed only
+the first attempt and never showed an error at all: `startRun` already retries once by
+itself, so a single transient failure never reaches the user. Good behaviour, and worth
+knowing — to test the user's Try again you have to get past the client's own retry.
+
+The script now captures `pageerror` and console errors. Without that, its first run
+just timed out waiting for an error chip with no hint that JavaScript had thrown.
 
 ### Fixed: an idle browser cost 570 Firestore reads a minute
 
