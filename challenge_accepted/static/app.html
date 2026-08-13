@@ -7,7 +7,12 @@
 <style>
   :root{
     --bg:#0B0D12; --panel:#12151D; --panel2:#171B25; --line:#232838;
-    --ink:#EDEFF3; --dim:#8B93A7; --faint:#5A6274;
+    /* --faint was #5A6274, which measured 3.18:1 against the panels -- below WCAG AA's
+       4.5:1 for body text, and it carries the stat labels, the map legend and the
+       roster. Unreadable on a projector, which is exactly where a hackathon demo gets
+       seen. #828A9E measures 4.98-5.63:1 across all three backgrounds.
+       scripts\check_a11y.py computes this from the rendered colours, not the CSS. */
+    --ink:#EDEFF3; --dim:#8B93A7; --faint:#828A9E;
     --todo:#6B7385; --active:#4C8DFF; --blocked:#FF5C5C; --done:#3DD68C;
     --gold:#FFC24B; --violet:#A78BFA;
     --glow:0 0 24px rgba(76,141,255,.35);
@@ -183,6 +188,10 @@
   .claude{background:linear-gradient(135deg,#7A4B2A,#C1683A);border-color:#C1683A88;color:#fff}
 
   .node{cursor:pointer}
+  /* A focus ring you can actually see on a dark map. `outline` does not render
+     reliably on an SVG <g> across browsers, so draw it. */
+  .node:focus{outline:none}
+  .node:focus rect.card{stroke:var(--gold);stroke-width:3;filter:brightness(1.3)}
   .node rect.card{transition:filter .15s}
   .node:hover rect.card{filter:brightness(1.4)}
   .node.sel rect.card{stroke-width:2.5}
@@ -316,7 +325,7 @@
 </div>
 
 <div id="modal">
-  <div class="sheet">
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="m-name">
     <header>
       <h2 id="m-name"></h2>
       <span class="badge" id="m-type"></span>
@@ -743,8 +752,17 @@ function drawGraph(g) {
         rx="14" fill="none" stroke="#4C8DFF" stroke-width="2.5"/>` : '';
     const check = d.status === 'done'
       ? `<text x="206" y="52" font-size="15" fill="#3DD68C">✔</text>` : '';
+    // tabindex + role + aria-label, because an SVG <g> with a click handler is
+    // invisible to the keyboard and announced as nothing. The quest map is the
+    // centrepiece of this product; a mouse-only centrepiece is a mouse-only product.
+    // The label reads the way someone would say it out loud, not as a field dump.
+    const say = `${d.label}. ${d.status}`
+      + (d.tools.length ? `, ${d.tools.length} tool${d.tools.length > 1 ? 's' : ''}` : '')
+      + (d.ready ? ', ready to start' : '')
+      + (d.effort_mins ? `, about ${d.effort_mins} minutes` : '');
     return `<g class="node${sel}" transform="translate(${n.position.x},${n.position.y})"
-              data-id="${esc(n.id)}">
+              data-id="${esc(n.id)}" tabindex="0" role="button"
+              aria-label="${esc(say)}">
         ${ring}
         <rect class="card" width="230" height="68" rx="12" fill="#12151D"
               stroke="${d.color}" stroke-width="1.6"/>
@@ -761,11 +779,23 @@ function drawGraph(g) {
       markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2A3040"/></marker>
     </defs>${edges}${nodes}</svg>`;
 
-  $('graph').querySelectorAll('.node').forEach(el => el.onclick = () => {
+  const open = el => {
     selected = el.dataset.id;
     showQuest(g.nodes.find(n => n.id === selected));
     document.querySelector('.tab[data-p="quest"]').click();
     drawGraph(g);
+    // The redraw replaces the SVG, so the element that had focus is gone. Put focus
+    // on its replacement or the keyboard user is dumped back at the top of the page.
+    const again = $('graph').querySelector(`.node[data-id="${CSS.escape(selected)}"]`);
+    if (again) again.focus();
+  };
+  $('graph').querySelectorAll('.node').forEach(el => {
+    el.onclick = () => open(el);
+    el.onkeydown = e => {
+      // Enter and Space are what `role="button"` promises. A promise the element does
+      // not keep is worse than no role at all.
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(el); }
+    };
   });
 }
 
@@ -1060,11 +1090,22 @@ function openTool(id) {
   };
 
   $('modal').classList.add('on');
+  // Move focus INTO the dialog. Without this a keyboard user is still tabbing through
+  // the quest map behind a full-screen overlay they cannot see past, and a screen
+  // reader never announces that anything opened.
+  toolOpener = document.activeElement;
+  $('m-close').focus();
 }
+
+//: Whoever opened the modal, so focus can go back there. Dumping focus at the top of
+//: the document on close is the other half of the same bug.
+let toolOpener = null;
 
 function closeTool() {
   $('modal').classList.remove('on');
   $('m-stage').innerHTML = '';   // stop any running mini-app
+  if (toolOpener && document.contains(toolOpener)) toolOpener.focus();
+  toolOpener = null;
 }
 
 $('m-close').onclick = closeTool;

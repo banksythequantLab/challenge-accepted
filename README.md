@@ -25,7 +25,7 @@ Built for the [All Things Agentic hackathon](https://allthingsagentichackathon.d
 |---|---|
 | Verified live | 8-turn interview -> charter saved -> 12-node DAG -> 6 tools built, smoke-tested and persisted |
 | Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
-| Verified | 52 tests pass against a real ADK `Runner`; FastAPI boots, `/api/healthz` 200 |
+| Verified | 97 tests pass against a real ADK `Runner`, plus 11 browser-driven checks that click the actual controls; FastAPI boots, `/api/healthz` 200 |
 | Measured | One full challenge (12 nodes, 6 tools) = **243k prompt / 66k billed output, ~$0.86**. Break-even at $29/seat ≈ **34 challenges/user/month** |
 | Fixed | The "exactly 4 tools" ceiling. Two causes, both live-only. See Known issues. |
 | Verified live | CLIMB end to end: node closed on evidence, feedback captured with reason, blocker -> group fact -> interview re-opened -> graph redrawn around the constraint |
@@ -62,7 +62,7 @@ python -m venv .venv
 .venv\Scripts\activate                 # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 
-pytest                                 # 52 tests, no API key needed
+pytest                                 # 97 tests, no API key needed
 ```
 
 To talk to the agents you need one key. Get a free one at
@@ -112,6 +112,8 @@ python scripts\check_forge_ui.py        # replays a synthetic ADK stream; assert
                                         # worker lanes fill and the read side does NOT
                                         # freeze while the agents work
 python scripts\check_phone.py           # the whole app on an iPhone 13 with real taps
+python scripts\check_a11y.py            # tabs the quest map, opens a tool with Enter,
+                                        # and computes contrast from rendered colours
 python scripts\check_errors.py          # 429, 500, a stream that dies halfway, and one
                                         # that recovers -- asserts each says what
                                         # happened, whether work survived, and offers
@@ -314,6 +316,33 @@ under it. The dashboard detects a session the server has never heard of, rebuild
 and retries the turn once — no reload, no lost conversation.
 `scripts\check_session_recovery.py` proves it by
 deleting the session out from under a live page and requiring the next turn to succeed.
+
+### Fixed: the quest map was mouse-only, and the labels failed contrast
+
+`scripts\check_a11y.py` drives three things a judge could actually hit, and all three
+were broken:
+
+* **All 11 quest nodes were unreachable by keyboard and had no accessible name.** They
+  are SVG `<g>` elements with click handlers, which are invisible to Tab and announced
+  as nothing. The map is this product's centrepiece, so a mouse-only map is a mouse-only
+  product. They now carry `tabindex`, `role="button"` and a label that reads the way
+  someone would say it aloud — *"Pick hosting that isn't Cloud Run. blocked, 1 tool,
+  about 60 minutes"* — plus Enter/Space handling, because a `role` the element does not
+  honour is worse than no role. Selecting a node redraws the SVG, so focus is explicitly
+  restored to its replacement; otherwise the keyboard user is dumped back at the top of
+  the page on every click.
+* **The tool viewer did not move focus.** A keyboard user opening it was still tabbing
+  through the map behind a full-screen overlay. It now takes focus, is marked
+  `role="dialog" aria-modal="true"`, and returns focus to the button that opened it.
+  (Escape already worked.)
+* **`--faint` measured 3.18:1** — below WCAG AA's 4.5:1 for body text, and it carries
+  the stat labels, the map legend and the party roster. Unreadable on a projector,
+  which is exactly where a hackathon demo gets seen. Now `#828A9E`, measured at
+  4.98–5.63:1 across all three panel backgrounds.
+
+Contrast is computed **from the rendered colours**, walking up ancestors for the first
+non-transparent background, rather than read off the stylesheet — so it reflects
+whatever actually won the cascade.
 
 ### Fixed: a failed run showed you a status code and nothing else
 
@@ -654,7 +683,7 @@ challenge_accepted/
     store.py          Firestore repository, in-memory fallback
     tools.py          ADK FunctionTools over the store
 main.py               Cloud Run entrypoint via get_fast_api_app
-tests/                52 tests, no API key required
+tests/                97 tests, no API key required
 scripts/              live walkthroughs and browser-driven end-to-end checks
 deploy/               deploy.ps1, check.ps1, smoke_live.ps1, SETUP.md
 docs/                 plan + architecture diagram
@@ -662,10 +691,11 @@ docs/                 plan + architecture diagram
 
 ## Next
 
-1. **Vertex AI Memory Bank and Agent Engine Sessions.** The wiring exists in `main.py`
-   -- `use_vertex()` returns true and both services switch to `agentengine://` the
-   moment an `AGENT_ENGINE_ID` is set. No Agent Engine has been created, so today
-   sessions are per-instance and in memory.
+1. **Vertex AI Memory Bank.** The wiring exists in `main.py` -- `use_vertex()` returns
+   true and the memory service switches to `agentengine://` the moment an
+   `AGENT_ENGINE_ID` is set. No Agent Engine has been created, so today group memory is
+   Firestore. (Sessions no longer wait on this: they run on our own Firestore-backed
+   `BaseSessionService`.)
 2. Firebase Auth, replacing the anonymous `localStorage` ids.
 3. Close the "joining teammate is never offered a `done` node" gap in the Status table
    -- the check exists but has never been exercised by a run that actually completed one.
@@ -675,7 +705,7 @@ docs/                 plan + architecture diagram
 
 ## How this was built, and what that taught
 
-**Tests that never call a model cannot find the bugs that matter.** All 52 pass, and
+**Tests that never call a model cannot find the bugs that matter.** All 97 pass, and
 they passed the entire time the system was silently building nothing. The 4-tool
 ceiling, the delegation loop, the dropped feedback, the duplicated group facts, the
 read-only dashboard -- every one surfaced in a scripted live run with full event
