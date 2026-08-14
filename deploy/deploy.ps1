@@ -18,6 +18,12 @@ param(
     # The 3.x Gemini models are served from the global endpoint on Vertex AI. The
     # service still RUNS in $Region; this only sets where the genai client looks.
     [string]$ModelLocation = "global",
+    # Vertex AI Memory Bank. The engine is REGIONAL and $ModelLocation is "global", so
+    # these are two separate settings on purpose -- the app emits a full resource path
+    # rather than letting ADK infer the region from GOOGLE_CLOUD_LOCATION. Leave
+    # -AgentEngineId empty and Memory Bank stays off; /api/healthz will say so.
+    [string]$AgentEngineId = "3470843198807474176",
+    [string]$AgentEngineLocation = "us-central1",
     [switch]$KeepWarm   # min-instances=1: use from the day you start rehearsing
 )
 
@@ -80,13 +86,23 @@ if ($KeepWarm) {
     Write-Host "==> min-instances=1 (cold starts will not eat your demo)" -ForegroundColor Yellow
 }
 
-$envVars = @(
+$envList = @(
     "GOOGLE_GENAI_USE_VERTEXAI=TRUE",
     "GOOGLE_CLOUD_PROJECT=$ProjectId",
     "GOOGLE_CLOUD_LOCATION=$ModelLocation",
     "CA_MODEL_REASONING=$ModelReasoning",
     "CA_MODEL_CHEAP=$ModelCheap"
-) -join ","
+)
+if ($AgentEngineId) {
+    $envList += "AGENT_ENGINE_ID=$AgentEngineId"
+    $envList += "AGENT_ENGINE_LOCATION=$AgentEngineLocation"
+    Write-Host "==> Memory Bank ON  (engine $AgentEngineId in $AgentEngineLocation)" -ForegroundColor Cyan
+} else {
+    Write-Host "==> Memory Bank OFF (no -AgentEngineId)" -ForegroundColor Yellow
+}
+# Sessions are NOT moved by this. AGENT_ENGINE_ID switches memory only; conversations
+# stay on the Firestore session service unless CA_SESSIONS=agentengine is set too.
+$envVars = $envList -join ","
 
 Write-Host "==> Deploying $Service" -ForegroundColor Cyan
 # --session-affinity keeps one conversation on one instance, which saves re-reading

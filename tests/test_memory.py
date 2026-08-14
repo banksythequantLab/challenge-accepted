@@ -59,7 +59,8 @@ class RecordingMemoryContext(FakeToolContext):
 # --- 1. two switches, not one -------------------------------------------------
 
 def _reload_config(monkeypatch, **env):
-    for key in ("GOOGLE_CLOUD_PROJECT", "AGENT_ENGINE_ID", "CA_SESSIONS"):
+    for key in ("GOOGLE_CLOUD_PROJECT", "AGENT_ENGINE_ID", "CA_SESSIONS",
+                "GOOGLE_CLOUD_LOCATION", "AGENT_ENGINE_LOCATION"):
         monkeypatch.delenv(key, raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
@@ -95,6 +96,55 @@ def test_an_engine_id_without_a_project_switches_nothing(monkeypatch):
     try:
         assert cfg.use_memory_bank() is False
         assert cfg.use_vertex_sessions() is False
+    finally:
+        _reload_config(monkeypatch)
+
+
+# --- 1b. the engine's region does not come from the model's region ------------
+
+def test_the_engine_region_survives_a_global_model_endpoint(monkeypatch):
+    """The trap this would have walked into on the very first deploy.
+
+    Production sets `GOOGLE_CLOUD_LOCATION=global`, because Gemini 3.x is served from
+    the global endpoint. ADK, handed a bare engine id, reads project and location from
+    exactly those variables -- so Memory Bank would have been built against a `global`
+    Agent Engine, which does not exist. And it would have failed silently, because both
+    ends swallow their errors on purpose: the app would run perfectly and remember
+    nothing. Emitting the full resource path is what stops that.
+    """
+    cfg = _reload_config(monkeypatch, GOOGLE_CLOUD_PROJECT="p",
+                         AGENT_ENGINE_ID="123", GOOGLE_CLOUD_LOCATION="global")
+    try:
+        assert cfg.agent_engine_resource() == (
+            "projects/p/locations/us-central1/reasoningEngines/123")
+        assert "global" not in cfg.agent_engine_resource()
+    finally:
+        _reload_config(monkeypatch)
+
+
+def test_a_full_resource_name_is_passed_through(monkeypatch):
+    full = "projects/other/locations/europe-west4/reasoningEngines/9"
+    cfg = _reload_config(monkeypatch, GOOGLE_CLOUD_PROJECT="p", AGENT_ENGINE_ID=full)
+    try:
+        assert cfg.agent_engine_resource() == full
+    finally:
+        _reload_config(monkeypatch)
+
+
+def test_the_engine_region_is_overridable(monkeypatch):
+    cfg = _reload_config(monkeypatch, GOOGLE_CLOUD_PROJECT="p", AGENT_ENGINE_ID="123",
+                         AGENT_ENGINE_LOCATION="europe-west4")
+    try:
+        assert cfg.agent_engine_resource().endswith(
+            "locations/europe-west4/reasoningEngines/123")
+    finally:
+        _reload_config(monkeypatch)
+
+
+def test_no_engine_means_no_resource(monkeypatch):
+    cfg = _reload_config(monkeypatch, GOOGLE_CLOUD_PROJECT="p")
+    try:
+        assert cfg.agent_engine_resource() is None
     finally:
         _reload_config(monkeypatch)
 

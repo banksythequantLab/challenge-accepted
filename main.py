@@ -41,7 +41,7 @@ def _session_uri() -> str | None:
     development and the test suite exercise this same path with zero GCP setup.
     """
     if config.use_vertex_sessions():
-        return f"agentengine://{config.AGENT_ENGINE_ID}"
+        return f"agentengine://{config.agent_engine_resource()}"
     session_store.register()
     return "firestore://sessions"
 
@@ -57,9 +57,13 @@ def _memory_uri() -> str | None:
     `save_charter` and `complete_node`. Returning a URI here and wiring neither end
     would give us a configured service that nothing consults -- the same shape as the
     feedback button that recorded verdicts no reader ever queried.
+
+    Emitted as a full resource path, not a bare id -- see `config.agent_engine_resource`
+    for the `GOOGLE_CLOUD_LOCATION=global` trap that would otherwise point Memory Bank
+    at a region the engine does not live in, silently.
     """
     if config.use_memory_bank():
-        return f"agentengine://{config.AGENT_ENGINE_ID}"
+        return f"agentengine://{config.agent_engine_resource()}"
     return None
 
 

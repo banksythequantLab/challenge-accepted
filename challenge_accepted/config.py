@@ -28,7 +28,13 @@ GOOGLE_CLOUD_LOCATION: str = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1")
 
 #: Vertex AI Agent Engine ID, used for both VertexAiSessionService and
 #: VertexAiMemoryBankService. Unset locally -> in-memory fallbacks.
+#: Accepts a bare id or a full `projects/.../reasoningEngines/...` resource name.
 AGENT_ENGINE_ID: str | None = os.getenv("AGENT_ENGINE_ID")
+
+#: The region the Agent Engine lives in. Deliberately NOT GOOGLE_CLOUD_LOCATION.
+#: In production that is "global", because Gemini 3.x is served from the global
+#: endpoint -- and an Agent Engine is a regional resource that has no global form.
+AGENT_ENGINE_LOCATION: str = os.getenv("AGENT_ENGINE_LOCATION", "us-central1")
 
 #: Resource name for the Agent Runtime sandbox that Toolwright builds inside.
 #: Unset locally -> BuiltInCodeExecutor (Gemini-side execution) instead.
@@ -51,6 +57,29 @@ FORGE_WORKERS: int = int(os.getenv("CA_FORGE_WORKERS", "4"))
 def use_memory_bank() -> bool:
     """True when an Agent Engine exists to host Vertex AI Memory Bank."""
     return bool(GOOGLE_CLOUD_PROJECT and AGENT_ENGINE_ID)
+
+
+def agent_engine_resource() -> str | None:
+    """The Agent Engine as a FULL resource name, never a bare id.
+
+    ADK's `agentengine://` factory branches on whether the URI contains a slash. Given
+    a bare id it falls back to `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` from
+    the environment -- and in this deployment `GOOGLE_CLOUD_LOCATION` is `global`,
+    because Gemini 3.x is served from the global endpoint and deploying with
+    `us-central1` returns `404 Publisher model ... not found`.
+
+    An Agent Engine has no global form. A bare id would therefore build a Memory Bank
+    client pointed at a region the engine does not live in. Nothing would crash at
+    startup: `preload_memory` swallows search failures and `remember_session` swallows
+    write failures, both by design, so the app would run perfectly and remember
+    nothing. Emitting the full path takes the location out of the environment's hands.
+    """
+    if not (GOOGLE_CLOUD_PROJECT and AGENT_ENGINE_ID):
+        return None
+    if "/" in AGENT_ENGINE_ID:
+        return AGENT_ENGINE_ID
+    return (f"projects/{GOOGLE_CLOUD_PROJECT}/locations/{AGENT_ENGINE_LOCATION}"
+            f"/reasoningEngines/{AGENT_ENGINE_ID}")
 
 
 def use_vertex_sessions() -> bool:
