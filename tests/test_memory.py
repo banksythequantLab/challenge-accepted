@@ -306,6 +306,58 @@ class _PreloadCtx:
 
 def _clear_cache():
     memory._EMPTY_UNTIL.clear()
+    memory._HAS_WRITTEN.clear()
+
+
+async def test_an_empty_search_after_a_write_is_not_cached():
+    """The regression that shipped, deployed, and broke live recall.
+
+    Memory Bank generates asynchronously -- about 30 seconds. So the turn that writes
+    is followed almost immediately by more preload searches that still find nothing.
+    The first version of this cache believed them and re-armed a 300-second marker, and
+    every probe after that skipped the search entirely. The memories were provably in
+    Memory Bank the whole time; the app simply stopped looking.
+
+    Clearing the marker on write is not enough. The write must make the user
+    permanently uncacheable in this process.
+    """
+    _clear_cache()
+    app, user = "challenge_accepted", "u_race"
+
+    memory.mark_empty(app, user)                 # T+0   turn one finds nothing
+    assert memory.looks_empty(app, user) is True
+
+    memory.forget_empty(app, user)               # T+90  save_charter writes
+    assert memory.looks_empty(app, user) is False
+
+    memory.mark_empty(app, user)                 # T+95  still generating, still empty
+    assert memory.looks_empty(app, user) is False, (
+        "an empty search after a write is Memory Bank still generating, not proof of "
+        "no past -- caching it costs the user recall for a full TTL")
+    _clear_cache()
+
+
+async def test_the_write_path_end_to_end_leaves_the_user_uncacheable():
+    """Same guarantee, but reached through `remember_session` rather than by hand --
+    because the bug lived in the gap between what the helpers do and what the real
+    call site actually reaches."""
+    _clear_cache()
+    ctx = RecordingMemoryContext(user_id="u_e2e")
+    ctx.user_id = "u_e2e"
+    ctx.session = type("S", (), {"app_name": "challenge_accepted"})()
+
+    memory.mark_empty("challenge_accepted", "u_e2e")
+    assert await memory.remember_session(ctx) is True
+
+    tool, req = memory.PreloadMemory(), _Req()
+    probe = _PreloadCtx("what do you know about me?", memories=[], user="u_e2e")
+    await tool.process_llm_request(tool_context=probe, llm_request=req)
+    assert probe.searches == 1, "a user we have written for is always searched"
+
+    later = _PreloadCtx("and my goal?", memories=[], user="u_e2e")
+    await tool.process_llm_request(tool_context=later, llm_request=req)
+    assert later.searches == 1, "still searched -- the empty result must not stick"
+    _clear_cache()
 
 
 async def test_an_empty_search_is_remembered_and_not_repeated():

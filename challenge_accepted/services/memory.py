@@ -42,8 +42,29 @@ logger = logging.getLogger(__name__)
 # serving turn one's matches on turn four would quietly make recall worse to
 # save time.
 
+# The first version of this cache shipped, deployed, and broke recall -- caught by
+# `scripts\check_memory.py` inside ten minutes, with the memories provably written and
+# the app unable to see them. The flaw:
+#
+#   T+0    turn 1 -- preload searches, finds nothing, marks empty (TTL 300s)
+#   T+90   save_charter writes to Memory Bank, clears the marker
+#   T+95   the same turn's later agents preload again. Memory Bank takes ~30s to
+#          generate, so the search is STILL empty -- and marks empty again, for a
+#          fresh 300s.
+#   T+135+ every probe is inside that window and skips the search entirely.
+#
+# Clearing the marker on write was not enough, because the write is asynchronous on the
+# server side and the next search races it. A user who has ever written is never cached
+# as empty again in this process: an empty result for them is transient by definition.
+
 #: app/user -> the moment we should stop believing they are empty.
 _EMPTY_UNTIL: dict[str, float] = {}
+
+#: app/user for anyone this process has successfully written a memory for. Never
+#: cached as empty again. One short string per user per instance; instances are
+#: recycled often enough that this does not need eviction at hackathon scale, and the
+#: comment is here so nobody discovers that the hard way at a different scale.
+_HAS_WRITTEN: set[str] = set()
 
 #: Short by design. The cost of being wrong is one turn without recall; the cost
 #: of a long TTL is a user whose first saved charter is invisible until it
@@ -57,7 +78,12 @@ def _key(app_name: str, user_id: str) -> str:
 
 
 def mark_empty(app_name: str, user_id: str) -> None:
-    _EMPTY_UNTIL[_key(app_name, user_id)] = time.monotonic() + EMPTY_TTL_S
+    key = _key(app_name, user_id)
+    if key in _HAS_WRITTEN:
+        # We wrote for them. An empty search is Memory Bank still generating, not
+        # evidence of no past -- and believing it costs them recall for a full TTL.
+        return
+    _EMPTY_UNTIL[key] = time.monotonic() + EMPTY_TTL_S
 
 
 def looks_empty(app_name: str, user_id: str) -> bool:
@@ -71,8 +97,10 @@ def looks_empty(app_name: str, user_id: str) -> bool:
 
 
 def forget_empty(app_name: str, user_id: str) -> None:
-    """Called the moment we write, so the next turn searches for real."""
-    _EMPTY_UNTIL.pop(_key(app_name, user_id), None)
+    """Called the moment we write. Clears the marker AND stops it being re-armed."""
+    key = _key(app_name, user_id)
+    _EMPTY_UNTIL.pop(key, None)
+    _HAS_WRITTEN.add(key)
 
 
 async def remember_session(tool_context: Any) -> bool:
