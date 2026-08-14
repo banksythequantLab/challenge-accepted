@@ -270,6 +270,136 @@ def test_preload_memory_is_not_model_callable():
     tool-count budget changes and we want to hear about it here rather than from a
     truncated tool list in a live run.
     """
-    from google.adk.tools.preload_memory_tool import preload_memory_tool
+    assert memory.preload_memory._get_declaration() is None
 
-    assert preload_memory_tool._get_declaration() is None
+
+# --- 4. the negative cache, and the private API it leans on -------------------
+
+class _Resp:
+    def __init__(self, memories):
+        self.memories = memories
+
+
+class _Req:
+    def __init__(self):
+        self.injected = []
+
+    def _append_dynamic_instructions(self, items):
+        self.injected.extend(items)
+
+
+class _PreloadCtx:
+    """Enough ToolContext surface for `process_llm_request`."""
+
+    def __init__(self, text, memories, app="challenge_accepted", user="u1"):
+        from google.genai import types
+        self.user_content = types.Content(role="user", parts=[types.Part(text=text)])
+        self.user_id = user
+        self.session = type("S", (), {"app_name": app})()
+        self._memories = memories
+        self.searches = 0
+
+    async def search_memory(self, query):
+        self.searches += 1
+        return _Resp(self._memories)
+
+
+def _clear_cache():
+    memory._EMPTY_UNTIL.clear()
+
+
+async def test_an_empty_search_is_remembered_and_not_repeated():
+    """The whole point. Measured live: an empty search costs ~1.8s, and Warden and the
+    Interviewer each pay it on every LLM request of a nine-question interview."""
+    _clear_cache()
+    tool, req = memory.PreloadMemory(), _Req()
+    ctx = _PreloadCtx("I want to run a 10k", memories=[])
+    await tool.process_llm_request(tool_context=ctx, llm_request=req)
+    assert ctx.searches == 1
+    assert memory.looks_empty("challenge_accepted", "u1") is True
+
+    again = _PreloadCtx("and I only have Tuesdays", memories=[])
+    await tool.process_llm_request(tool_context=again, llm_request=req)
+    assert again.searches == 0, "the second turn should not re-ask"
+    _clear_cache()
+
+
+async def test_a_hit_is_injected_and_never_cached():
+    """Positive results are semantic matches against what the user just typed. Serving
+    turn one's matches on turn four would trade recall quality for latency."""
+    from google.genai import types
+    _clear_cache()
+    hit = type("M", (), {
+        "timestamp": None, "author": "user",
+        "content": types.Content(parts=[types.Part(text="I train Tuesdays only")]),
+    })()
+    tool, req = memory.PreloadMemory(), _Req()
+    ctx = _PreloadCtx("what do you know about me?", memories=[hit])
+    await tool.process_llm_request(tool_context=ctx, llm_request=req)
+
+    assert ctx.searches == 1
+    assert len(req.injected) == 1
+    assert "I train Tuesdays only" in req.injected[0]
+    assert "<PAST_CONVERSATIONS>" in req.injected[0]
+    assert memory.looks_empty("challenge_accepted", "u1") is False, "never cache a hit"
+
+    second = _PreloadCtx("and my goal?", memories=[hit])
+    await tool.process_llm_request(tool_context=second, llm_request=req)
+    assert second.searches == 1, "a user with memories is searched every turn"
+    _clear_cache()
+
+
+async def test_writing_a_memory_clears_the_empty_marker():
+    """Otherwise the user's first saved charter is invisible until the TTL expires."""
+    _clear_cache()
+    memory.mark_empty("challenge_accepted", "u_new")
+    assert memory.looks_empty("challenge_accepted", "u_new") is True
+
+    ctx = RecordingMemoryContext(user_id="u_new")
+    ctx.user_id = "u_new"
+    ctx.session = type("S", (), {"app_name": "challenge_accepted"})()
+    assert await memory.remember_session(ctx) is True
+    assert memory.looks_empty("challenge_accepted", "u_new") is False
+    _clear_cache()
+
+
+async def test_a_failed_write_leaves_the_marker_alone():
+    """Nothing was stored, so nothing changed about what they have."""
+    _clear_cache()
+    memory.mark_empty("challenge_accepted", "u_x")
+    ctx = ExplodingMemoryContext()
+    ctx.user_id = "u_x"
+    ctx.session = type("S", (), {"app_name": "challenge_accepted"})()
+    assert await memory.remember_session(ctx) is False
+    assert memory.looks_empty("challenge_accepted", "u_x") is True
+    _clear_cache()
+
+
+async def test_a_broken_search_is_not_cached_as_empty():
+    """An outage is not evidence that the user has no past. Caching it would suppress
+    recall for the whole TTL after a single blip."""
+    _clear_cache()
+
+    class Boom(_PreloadCtx):
+        async def search_memory(self, query):
+            self.searches += 1
+            raise RuntimeError("503")
+
+    tool, req = memory.PreloadMemory(), _Req()
+    ctx = Boom("hello", memories=[])
+    await tool.process_llm_request(tool_context=ctx, llm_request=req)
+    assert req.injected == []
+    assert memory.looks_empty("challenge_accepted", "u1") is False
+    _clear_cache()
+
+
+def test_the_private_adk_method_we_depend_on_still_exists():
+    """`PreloadMemory` copies ADK 2.6.3's inject step, which calls a private method.
+
+    If an upgrade renames it, every memory injection would vanish silently -- the app
+    would run perfectly and recall nothing, which is exactly how the feedback button
+    spent a month writing rows no reader queried. Fail here instead.
+    """
+    from google.adk.models import LlmRequest
+
+    assert hasattr(LlmRequest, "_append_dynamic_instructions")

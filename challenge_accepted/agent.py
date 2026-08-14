@@ -8,9 +8,8 @@ from __future__ import annotations
 
 from google.adk.agents import LlmAgent
 from google.adk.agents.readonly_context import ReadonlyContext
-from google.adk.tools.preload_memory_tool import preload_memory_tool
-
 from . import config, prompts
+from .services.memory import preload_memory
 from .services.store import store
 from .services.tools import read_challenge_state, remember_group_fact, write_journal
 from .sub_agents import archivist, cartographer, coach, forge, interviewer
@@ -76,7 +75,7 @@ root_agent = LlmAgent(
     # mean the agent we test is not the agent we ship, which is the shape of most of
     # the bugs in the Known issues section.
     tools=[scout_tool, read_challenge_state, write_journal, remember_group_fact,
-           preload_memory_tool],
+           preload_memory],
 )
 
 __all__ = ["root_agent", "warden_instruction"]
