@@ -5,6 +5,10 @@ google-cloud-firestore>=2.19.0
 # Only imported when AGENT_ENGINE_ID is set: VertexAiMemoryBankService does
 # `import vertexai` inside __init__ and raises missing_extra without it.
 google-cloud-aiplatform>=1.126.0
+# Imported lazily by ADK, and ONLY when trace_to_cloud=True. Absent, the very first
+# deploy with CA_TRACE_TO_CLOUD=1 dies at import with ModuleNotFoundError before the
+# port is bound -- which is exactly how revision 00014 failed.
+opentelemetry-exporter-gcp-trace>=1.9.0
 fastapi==0.141.1
 uvicorn[standard]==0.46.0
 pydantic==2.13.3

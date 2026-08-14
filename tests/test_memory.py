@@ -60,7 +60,8 @@ class RecordingMemoryContext(FakeToolContext):
 
 def _reload_config(monkeypatch, **env):
     for key in ("GOOGLE_CLOUD_PROJECT", "AGENT_ENGINE_ID", "CA_SESSIONS",
-                "GOOGLE_CLOUD_LOCATION", "AGENT_ENGINE_LOCATION"):
+                "GOOGLE_CLOUD_LOCATION", "AGENT_ENGINE_LOCATION",
+                "CA_TRACE_TO_CLOUD"):
         monkeypatch.delenv(key, raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
@@ -137,6 +138,29 @@ def test_the_engine_region_is_overridable(monkeypatch):
     try:
         assert cfg.agent_engine_resource().endswith(
             "locations/europe-west4/reasoningEngines/123")
+    finally:
+        _reload_config(monkeypatch)
+
+
+def test_memory_bank_does_not_switch_on_cloud_trace(monkeypatch):
+    """Revision 00014 crash-looped on exactly this.
+
+    `trace_to_cloud` shared the predicate too, so the first deploy that set
+    AGENT_ENGINE_ID made ADK import an OpenTelemetry exporter that was not installed,
+    and the container died before binding the port.
+    """
+    cfg = _reload_config(monkeypatch, GOOGLE_CLOUD_PROJECT="p", AGENT_ENGINE_ID="123")
+    try:
+        assert cfg.use_memory_bank() is True
+        assert cfg.use_cloud_trace() is False
+    finally:
+        _reload_config(monkeypatch)
+
+
+def test_cloud_trace_switches_on_when_asked(monkeypatch):
+    cfg = _reload_config(monkeypatch, GOOGLE_CLOUD_PROJECT="p", CA_TRACE_TO_CLOUD="1")
+    try:
+        assert cfg.use_cloud_trace() is True
     finally:
         _reload_config(monkeypatch)
 

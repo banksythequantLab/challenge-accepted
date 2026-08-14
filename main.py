@@ -73,7 +73,7 @@ app = get_fast_api_app(
     memory_service_uri=_memory_uri(),
     allow_origins=os.getenv("CA_ALLOW_ORIGINS", "*").split(","),
     web=True,                      # ADK dev UI at / -- useful for the demo video
-    trace_to_cloud=config.use_memory_bank(),
+    trace_to_cloud=config.use_cloud_trace(),
 )
 
 

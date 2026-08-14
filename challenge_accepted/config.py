@@ -82,6 +82,31 @@ def agent_engine_resource() -> str | None:
             f"/reasoningEngines/{AGENT_ENGINE_ID}")
 
 
+def use_cloud_trace() -> bool:
+    """Cloud Trace export. Its own switch, off by default, and that is a bug fix.
+
+    `trace_to_cloud` was wired to the same predicate as sessions and memory. It had
+    therefore never once been true in this deployment -- and the first deploy that set
+    `AGENT_ENGINE_ID` proved why that mattered:
+
+        File "/app/main.py", line 70, in <module>
+          app = get_fast_api_app(
+        ModuleNotFoundError: No module named 'opentelemetry.exporter'
+
+    ADK imports `opentelemetry.exporter.cloud_trace` lazily, only when
+    `trace_to_cloud=True`. The exporter was never in requirements.txt, so switching on
+    Memory Bank crashed the container at import and Cloud Run refused the revision.
+    Nothing was lost -- the old revision kept serving and `deploy.ps1`'s exit-code check
+    reported the failure -- but a third unrelated subsystem riding on one flag is
+    exactly the thing that predicate was split up to prevent.
+
+    `opentelemetry-exporter-gcp-trace` is in requirements.txt now, so `CA_TRACE_TO_CLOUD=1`
+    works. It stays off by default because a deploy should not switch on a subsystem
+    nobody asked for.
+    """
+    return os.getenv("CA_TRACE_TO_CLOUD", "0") == "1" and bool(GOOGLE_CLOUD_PROJECT)
+
+
 def use_vertex_sessions() -> bool:
     """Whether conversations live in Agent Engine instead of our own service.
 
