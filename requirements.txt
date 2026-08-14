@@ -2,6 +2,9 @@
 google-adk==2.6.3
 google-genai==2.17.0
 google-cloud-firestore>=2.19.0
+# Only imported when AGENT_ENGINE_ID is set: VertexAiMemoryBankService does
+# `import vertexai` inside __init__ and raises missing_extra without it.
+google-cloud-aiplatform>=1.126.0
 fastapi==0.141.1
 uvicorn[standard]==0.46.0
 pydantic==2.13.3

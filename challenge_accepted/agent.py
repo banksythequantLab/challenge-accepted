@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from google.adk.agents import LlmAgent
 from google.adk.agents.readonly_context import ReadonlyContext
+from google.adk.tools.preload_memory_tool import preload_memory_tool
 
 from . import config, prompts
 from .services.store import store
@@ -66,7 +67,16 @@ root_agent = LlmAgent(
     # on a turn where it held no tool capable of doing so. Nothing was written. An
     # agent that can claim a thing must be able to do the thing -- the alternative is
     # a product whose central promise is a sentence it made up.
-    tools=[scout_tool, read_challenge_state, write_journal, remember_group_fact],
+    # `preload_memory` is not model-callable. It hooks `process_llm_request`, searches
+    # Vertex AI Memory Bank with whatever the user just typed, and appends any hits as
+    # dynamic instructions -- so it costs nothing against the tool-count ceiling that
+    # bit us before. It is wired unconditionally, including locally and under test,
+    # because ADK's implementation swallows every exception out of `search_memory`:
+    # with no memory service it logs and returns. Wiring it only in production would
+    # mean the agent we test is not the agent we ship, which is the shape of most of
+    # the bugs in the Known issues section.
+    tools=[scout_tool, read_challenge_state, write_journal, remember_group_fact,
+           preload_memory_tool],
 )
 
 __all__ = ["root_agent", "warden_instruction"]

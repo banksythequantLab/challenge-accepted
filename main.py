@@ -40,15 +40,25 @@ def _session_uri() -> str | None:
     With no GOOGLE_CLOUD_PROJECT the store falls back to its in-memory dict, so local
     development and the test suite exercise this same path with zero GCP setup.
     """
-    if config.use_vertex():
+    if config.use_vertex_sessions():
         return f"agentengine://{config.AGENT_ENGINE_ID}"
     session_store.register()
     return "firestore://sessions"
 
 
 def _memory_uri() -> str | None:
-    """Vertex AI Memory Bank -- the semantic layer behind group intelligence."""
-    if config.use_vertex():
+    """Vertex AI Memory Bank -- personal recall across challenges.
+
+    Personal, not shared: Memory Bank scopes memories to `(app_name, user_id)`. The
+    party's shared notebook is `remember_group_fact` -> Firestore. See
+    `services/memory.py` for why those are kept apart.
+
+    Read by ADK's `preload_memory` tool on Warden and the Interviewer; written by
+    `save_charter` and `complete_node`. Returning a URI here and wiring neither end
+    would give us a configured service that nothing consults -- the same shape as the
+    feedback button that recorded verdicts no reader ever queried.
+    """
+    if config.use_memory_bank():
         return f"agentengine://{config.AGENT_ENGINE_ID}"
     return None
 
@@ -59,7 +69,7 @@ app = get_fast_api_app(
     memory_service_uri=_memory_uri(),
     allow_origins=os.getenv("CA_ALLOW_ORIGINS", "*").split(","),
     web=True,                      # ADK dev UI at / -- useful for the demo video
-    trace_to_cloud=config.use_vertex(),
+    trace_to_cloud=config.use_memory_bank(),
 )
 
 
@@ -85,7 +95,11 @@ def healthz() -> dict[str, object]:
     return {
         "ok": True,
         "store": store.backend,
-        "vertex": config.use_vertex(),
+        "vertex": config.use_memory_bank(),
+        # Named separately because they are separately switchable, and because a claim
+        # about Memory Bank is only checkable if the deploy will state it out loud.
+        "memory": "agentengine" if config.use_memory_bank() else "none",
+        "sessions": "agentengine" if config.use_vertex_sessions() else "firestore",
         "models": {"reasoning": config.MODEL_REASONING, "cheap": config.MODEL_CHEAP},
     }
 

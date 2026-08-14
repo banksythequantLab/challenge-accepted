@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 from google.adk.tools import ToolContext
 
+from . import memory
 from .store import store
 
 PENDING_JOURNAL = "journal.pending"
@@ -66,7 +67,7 @@ def _group_id(tool_context: ToolContext) -> str:
     return f"grp_{tool_context.state.get('user_id', 'anon')}"
 
 
-def save_charter(
+async def save_charter(
     title: str,
     outcome: str,
     definition_of_done: str,
@@ -120,6 +121,12 @@ def save_charter(
 
     store.add_journal(cid, {"actor": "Interviewer", "kind": "decision",
                             "text": f"Charter locked: {outcome}"})
+
+    # The interview is the densest source of durable facts about this person -- what
+    # they tried before, what they are short of, who else is involved. Hand it to
+    # Memory Bank here, while it is still in the session, so the *next* challenge
+    # starts from what we already learned. Never fatal; see services/memory.py.
+    await memory.remember_session(tool_context)
     return {"status": "ok", "challenge_id": cid}
 
 
@@ -339,7 +346,8 @@ def _tool_feedback(cid: str) -> list[dict[str, Any]]:
     return out
 
 
-def complete_node(node_id: str, evidence: str, tool_context: ToolContext) -> dict[str, Any]:
+async def complete_node(node_id: str, evidence: str,
+                        tool_context: ToolContext) -> dict[str, Any]:
     """Mark a node done, with the evidence that justifies it.
 
     Args:
@@ -355,6 +363,10 @@ def complete_node(node_id: str, evidence: str, tool_context: ToolContext) -> dic
     store.set_node_status(cid, node_id, "done", evidence)
     store.add_journal(cid, {"actor": "Referee", "kind": "decision", "node_id": node_id,
                             "text": f"Node '{node_id}' closed. Evidence: {evidence}"})
+
+    # A closed node is the other kind of durable fact: not what they said they would
+    # do, but what they actually finished and what it took. Never fatal.
+    await memory.remember_session(tool_context)
     return {"status": "ok"}
 
 

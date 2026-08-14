@@ -48,9 +48,27 @@ MAX_NODES: int = int(os.getenv("CA_MAX_NODES", "20"))
 FORGE_WORKERS: int = int(os.getenv("CA_FORGE_WORKERS", "4"))
 
 
-def use_vertex() -> bool:
-    """True when we have enough config to talk to managed Vertex services."""
+def use_memory_bank() -> bool:
+    """True when an Agent Engine exists to host Vertex AI Memory Bank."""
     return bool(GOOGLE_CLOUD_PROJECT and AGENT_ENGINE_ID)
+
+
+def use_vertex_sessions() -> bool:
+    """Whether conversations live in Agent Engine instead of our own service.
+
+    Off by default even when an Agent Engine exists, and that default is the point.
+    This used to be one predicate -- `use_vertex()` -- shared by sessions and memory,
+    so setting `AGENT_ENGINE_ID` to switch on Memory Bank would also have moved every
+    conversation off the Firestore session service: the code with the test asserting
+    `append_event` never yields to the event loop, and the fix for the per-instance
+    SQLite amnesia documented in `main._session_uri`. Two unrelated subsystems behind
+    one environment variable is how a proven component gets swapped for an untested one
+    without a line of code changing, on the deploy where you were thinking about
+    something else.
+
+    Set `CA_SESSIONS=agentengine` to move sessions deliberately.
+    """
+    return use_memory_bank() and os.getenv("CA_SESSIONS", "firestore") == "agentengine"
 
 
 def use_firestore() -> bool:

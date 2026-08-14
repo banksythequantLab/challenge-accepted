@@ -25,7 +25,7 @@ Built for the [All Things Agentic hackathon](https://allthingsagentichackathon.d
 |---|---|
 | Verified live | 8-turn interview -> charter saved -> 12-node DAG -> 6 tools built, smoke-tested and persisted |
 | Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
-| Verified | 97 tests pass against a real ADK `Runner`, plus 13 browser-driven checks that click the actual controls; FastAPI boots, `/api/healthz` 200 |
+| Verified | 110 tests pass against a real ADK `Runner`, plus 13 browser-driven checks that click the actual controls; FastAPI boots, `/api/healthz` 200 |
 | Measured | One full challenge (12 nodes, 6 tools) = **243k prompt / 66k billed output, ~$0.86**. Break-even at $29/seat ≈ **34 challenges/user/month** |
 | Fixed | The "exactly 4 tools" ceiling. Two causes, both live-only. See Known issues. |
 | Verified live | CLIMB end to end: node closed on evidence, feedback captured with reason, blocker -> group fact -> interview re-opened -> graph redrawn around the constraint |
@@ -62,7 +62,7 @@ python -m venv .venv
 .venv\Scripts\activate                 # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 
-pytest                                 # 97 tests, no API key needed
+pytest                                 # 110 tests, no API key needed
 ```
 
 To talk to the agents you need one key. Get a free one at
@@ -299,10 +299,46 @@ The writes are synchronous now, deliberately, with a test that drives the corout
 hand and fails if it ever yields. Reads keep their thread hop: they are called from
 ordinary request handlers, not from inside a generator.
 
-### Memory Bank is not wired, and the diagram now says so
+### Memory Bank: wired at both ends, still switched off
 
-`main.py` switches the memory service to `agentengine://{AGENT_ENGINE_ID}` the moment
-`use_vertex()` is true. No Agent Engine has been created, so today it is false.
+Until now `main.py` set `memory_service_uri` and that was the entire integration.
+Nothing read memory and nothing wrote it, so setting `AGENT_ENGINE_ID` would have
+produced a configured service that no code path ever consulted — the same shape as the
+feedback button that recorded verdicts no reader ever queried. "The wiring exists" was
+true of the URI and false of the feature.
+
+Both ends now exist:
+
+* **Read** — ADK's `preload_memory` on Warden and the Interviewer. It is not
+  model-callable: it hooks `process_llm_request`, searches with the user's own words and
+  appends hits as dynamic instructions, so it costs nothing against the tool-count
+  ceiling. It is wired unconditionally, including under test, because ADK's
+  implementation swallows every exception out of `search_memory` — wiring it only in
+  production would mean the agent we test is not the agent we ship.
+* **Write** — `save_charter` and `complete_node` hand the session to the memory service.
+  Those are the two moments a durable fact exists; ingesting every turn would re-send
+  the whole session for consolidation after turns that decided nothing. Both calls are
+  best effort. A charter that fails because a nice-to-have recall layer had a bad minute
+  is a worse product than one that quietly remembers less.
+
+**It is personal recall, not the party's memory, and the code says so.** Memory Bank
+scopes to `(app_name, user_id)`. The shared notebook is `remember_group_fact` →
+Firestore `groups/{id}.shared_facts`. The two look alike in a diagram and are not the
+same thing; conflating them would promise a teammate a memory they do not share.
+
+**One env var used to move two subsystems.** `use_vertex()` gated sessions *and* memory,
+so switching on Memory Bank would also have moved every conversation off the Firestore
+session service — the code with the test asserting `append_event` never yields to the
+event loop. Nothing would have failed; sessions would just have been served by code with
+no coverage here. That is now `use_memory_bank()` and `use_vertex_sessions()`, sessions
+stay put unless `CA_SESSIONS=agentengine`, and `/api/healthz` reports `memory` and
+`sessions` separately so a deploy states which backends it is on.
+
+Still switched off in production: no Agent Engine exists yet, so `use_memory_bank()` is
+false and `/api/healthz` reports `"memory":"none"`. Creating one needs a `gcloud auth
+login` that has expired. **No claim is made here that Memory Bank has stored or recalled
+anything** — that is unproven until a live run does it, and there is no check in
+`scripts/` for it yet.
 
 The architecture diagram used to draw Memory Bank, Agent Sessions and a persistent
 Agent Engine code sandbox as though all three were running. They were not. Those cards
@@ -686,7 +722,7 @@ challenge_accepted/
     store.py          Firestore repository, in-memory fallback
     tools.py          ADK FunctionTools over the store
 main.py               Cloud Run entrypoint via get_fast_api_app
-tests/                97 tests, no API key required
+tests/                110 tests, no API key required
 scripts/              live walkthroughs and browser-driven end-to-end checks
 deploy/               deploy.ps1, check.ps1, smoke_live.ps1, SETUP.md
 docs/                 plan + architecture diagram
@@ -694,11 +730,23 @@ docs/                 plan + architecture diagram
 
 ## Next
 
-1. **Vertex AI Memory Bank.** The wiring exists in `main.py` -- `use_vertex()` returns
-   true and the memory service switches to `agentengine://` the moment an
-   `AGENT_ENGINE_ID` is set. No Agent Engine has been created, so today group memory is
-   Firestore. (Sessions no longer wait on this: they run on our own Firestore-backed
-   `BaseSessionService`.)
+1. **Vertex AI Memory Bank.** Read and write are both wired now -- `preload_memory` on
+   Warden and the Interviewer, `add_session_to_memory` from `save_charter` and
+   `complete_node` -- and 13 tests pin the behaviour, including that a dead memory
+   service cannot stop a charter saving. What is missing is the Agent Engine itself:
+   `use_memory_bank()` is false in production and `/api/healthz` says
+   `"memory":"none"`. Creating one needs `gcloud auth login` (the token on this machine
+   has expired), then `AGENT_ENGINE_ID` on the service and a redeploy.
+
+   **Nothing here claims Memory Bank has stored or recalled anything.** Until a live
+   run does it, the only honest statement is that the code paths exist and are tested
+   against fakes. The check that would settle it does not exist yet: run one challenge
+   to a saved charter, start a second challenge as the same user, and assert the
+   Interviewer skips a question it already has the answer to.
+
+   Note it is *personal* recall -- Memory Bank scopes to `(app_name, user_id)`. The
+   party's shared memory is `remember_group_fact` -> Firestore, and that has worked all
+   along.
 2. Firebase Auth, replacing the anonymous `localStorage` ids.
 3. **Map `challengeaccepted.app`.** Blocked on domain verification, not on code. The
    mapping resource now exists in `us-central1` and reports exactly what it is waiting
@@ -737,7 +785,7 @@ docs/                 plan + architecture diagram
 
 ## How this was built, and what that taught
 
-**Tests that never call a model cannot find the bugs that matter.** All 97 pass, and
+**Tests that never call a model cannot find the bugs that matter.** All 110 pass, and
 they passed the entire time the system was silently building nothing. The 4-tool
 ceiling, the delegation loop, the dropped feedback, the duplicated group facts, the
 read-only dashboard -- every one surfaced in a scripted live run with full event

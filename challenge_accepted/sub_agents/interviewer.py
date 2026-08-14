@@ -10,6 +10,7 @@ agent transfer plus Sequential/Parallel/Loop agents, not a workflow graph.
 from __future__ import annotations
 
 from google.adk.agents import LlmAgent
+from google.adk.tools.preload_memory_tool import preload_memory_tool
 
 from .. import config, prompts
 from ..services.tools import read_challenge_state, save_charter, write_journal
@@ -24,5 +25,9 @@ interviewer = LlmAgent(
     ),
     instruction=prompts.INTERVIEWER,
     mode="task",
-    tools=[read_challenge_state, save_charter, write_journal],
+    # `preload_memory` earns its place here more than anywhere else: the cheapest
+    # clarifying question is the one we do not have to ask because the user answered
+    # it during a previous challenge. It is not model-callable -- it hooks the LLM
+    # request and injects any hits as dynamic instructions.
+    tools=[read_challenge_state, save_charter, write_journal, preload_memory_tool],
 )

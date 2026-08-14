@@ -169,10 +169,10 @@ def test_a_stale_challenge_id_does_not_break_the_instruction():
     assert "You are Warden" in text
 
 
-def test_the_founder_is_on_their_own_roster():
+async def test_the_founder_is_on_their_own_roster():
     """Otherwise a solo challenge reports a party of zero."""
     alice = FakeToolContext(user_id="u_erin", group_id="grp_u_erin")
-    result = tools.save_charter(
+    result = await tools.save_charter(
         title="Learn to weld",
         outcome="weld a bike frame that holds",
         definition_of_done="frame survives a 20 mile ride",

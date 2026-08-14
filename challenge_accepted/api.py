@@ -87,7 +87,9 @@ def healthz() -> dict[str, Any]:
     return {
         "ok": True,
         "store": store.backend,
-        "vertex": config.use_vertex(),
+        "vertex": config.use_memory_bank(),
+        "memory": "agentengine" if config.use_memory_bank() else "none",
+        "sessions": "agentengine" if config.use_vertex_sessions() else "firestore",
         "models": {
             "reasoning": config.MODEL_REASONING,
             "cheap": config.MODEL_CHEAP,
