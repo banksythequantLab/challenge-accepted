@@ -787,38 +787,37 @@ docs/                 plan + architecture diagram
    `group_id`; the obvious risk is writing one person's private context into a group
    everyone can read, so it needs a rule about what is shareable before it needs code.
 2. Firebase Auth, replacing the anonymous `localStorage` ids.
-3. **Map `challengeaccepted.app`.** Blocked on domain verification, not on code. The
-   mapping resource now exists in `us-central1` and reports exactly what it is waiting
-   for:
+3. **Map `challengeaccepted.app`.** Verified and routable; waiting on DNS records.
 
+   Ownership is verified in Search Console, so `gcloud domains list-user-verified` now
+   returns 16 domains including this one. Domain mappings exist for the apex and `www`,
+   and both report `DomainRoutable=True` with `Ready=Unknown / CertificatePending` --
+   Google has accepted the domain and is waiting to be pointed at.
+
+   Nine records go in Cloudflare, all **DNS only** (grey cloud): four A and four AAAA at
+   the apex, and `www` CNAME to `ghs.googlehosted.com.`. Read them from
+   `status.resourceRecords` on the mapping rather than from anyone's memory:
+
+   ```powershell
+   $tok = gcloud auth print-access-token
+   irm -Headers @{Authorization="Bearer $tok"} `
+     "https://us-central1-run.googleapis.com/apis/domains.cloudrun.com/v1/namespaces/$PROJECT/domainmappings/challengeaccepted.app" |
+     % { $_.status.resourceRecords }
    ```
-   Ready=False  reason=PermissionDenied
-   Caller is not authorized to administer the domain challengeaccepted.app.
-   ```
 
-   DNS for the domain is on Cloudflare (`dalary`/`kolton.ns.cloudflare.com`) and the zone
-   is empty -- no A, AAAA, CNAME or TXT at the apex. `gcloud domains list-user-verified`
-   returns 15 domains and this is not one of them, so Cloud Run will not make the domain
-   routable and will not provision a certificate.
+   **Grey cloud is load-bearing, not a preference.** Proxied, Google can never complete
+   the challenge that issues the managed certificate, and the mapping sits at
+   `CertificatePending` indefinitely with nothing in the error to tell you why. It also
+   keeps Cloudflare out of the path of the SSE event stream the live feed depends on.
 
-   Three steps remain, and only the first needs a human:
+   The tempting Cloudflare-side alternative -- a proxied CNAME plus an Origin Rule
+   rewriting the `Host` header to the `run.app` hostname -- is not available: Host header
+   override, SNI override and DNS record override are all Enterprise-only. A Worker would
+   work on a free plan, but it puts a proxy in front of an SSE stream for no gain over
+   DNS-only.
 
-   1. In Google Search Console, add a **Domain** property for `challengeaccepted.app`,
-      copy the `google-site-verification=...` TXT value, add it at the Cloudflare apex,
-      then Verify. Verifying the apex covers `www` and every other subdomain.
-   2. Re-read the mapping; `status.resourceRecords` then carries the A/AAAA records to
-      add. Read them from the API rather than hard-coding them from memory.
-   3. Add those records in Cloudflare as **DNS only** (grey cloud). Google's managed
-      certificate cannot be issued through Cloudflare's proxy, and leaving the proxy off
-      also keeps the agent event stream unbuffered.
-
-   The obvious Cloudflare-side shortcut -- a proxied CNAME plus an Origin Rule rewriting
-   the `Host` header to the `run.app` hostname -- does not apply: Host header override,
-   SNI override and DNS record override are all Enterprise-only. A Worker would work on a
-   free plan, but it puts a proxy in front of an SSE stream for no gain over DNS-only.
-
-   Until this lands, the Cloud Run URL is the only address worth putting on camera -- and
-   `docs\DEMO_SCRIPT.md` says so.
+   Until the certificate provisions, the Cloud Run URL is the only address worth putting
+   on camera -- and `docs\DEMO_SCRIPT.md` says so.
 
 ---
 
