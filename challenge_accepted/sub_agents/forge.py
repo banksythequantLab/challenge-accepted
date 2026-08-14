@@ -26,6 +26,8 @@ Two deliberate choices worth defending to a judge:
 
 from __future__ import annotations
 
+import logging
+import os
 from typing import AsyncGenerator
 
 from google.adk.agents import BaseAgent, LlmAgent, LoopAgent, ParallelAgent, SequentialAgent
@@ -39,6 +41,21 @@ from pydantic import BaseModel, Field
 from .. import config, prompts
 from ..schemas import ToolSpec
 from ..services.tools import _tool_feedback, save_tool
+
+
+logger = logging.getLogger(__name__)
+
+#: FORGE is the one phase whose failures are invisible: a worker that does nothing looks
+#: exactly like a worker with nothing to do, and the dashboard renders identically either
+#: way. Six specs became one tool on the deployed service with no error anywhere. Set
+#: `CA_FORGE_DEBUG=1` and the phase narrates itself into Cloud Logging at WARNING, which
+#: is the level that survives the default Cloud Run config.
+FORGE_DEBUG: bool = os.getenv("CA_FORGE_DEBUG", "0") == "1"
+
+
+def _trace(message: str) -> None:
+    if FORGE_DEBUG:
+        logger.warning("[FORGE] %s", message)
 
 
 def quartermaster_instruction(ctx: ReadonlyContext) -> str:
@@ -122,6 +139,35 @@ def _worker_config() -> types.GenerateContentConfig:
     )
 
 
+def _saw_its_slot(index: int):
+    """Did this worker start, and was there anything in its inbox when it did?
+
+    An idle worker and a broken worker produce the same output: nothing. This is the
+    only place that can tell them apart, because it runs before the model does.
+    """
+
+    def _cb(callback_context):
+        if not FORGE_DEBUG:
+            return None
+        slot = callback_context.state.get(f"{SLOT_PREFIX}{index}")
+        node = slot.get("node_id") if isinstance(slot, dict) else slot
+        _trace(f"worker {index}: START slot={'EMPTY' if slot is None else node!r} "
+               f"branch={getattr(callback_context, 'branch', '?')}")
+        return None
+
+    return _cb
+
+
+def _finished(index: int):
+    def _cb(callback_context):
+        if not FORGE_DEBUG:
+            return None
+        _trace(f"worker {index}: END")
+        return None
+
+    return _cb
+
+
 def _worker(index: int) -> LlmAgent:
     """One Toolwright.
 
@@ -173,6 +219,8 @@ def _worker(index: int) -> LlmAgent:
         # instruction plus the injected slot, so an empty slot reliably means idle.
         include_contents="none",
         generate_content_config=_worker_config(),
+        before_agent_callback=_saw_its_slot(index),
+        after_agent_callback=_finished(index),
     )
 
 
@@ -218,6 +266,11 @@ class Dispatcher(BaseAgent):
             delta[f"{SLOT_PREFIX}{i}"] = batch[i] if i < len(batch) else None
 
         done = not batch
+        _trace(
+            f"dispatch: specs={len(specs)} batch={len(batch)} remaining={len(queue)} "
+            f"escalate={done} reseed={state.get(SEED_KEY) != fingerprint} "
+            f"slots={[ (batch[i].get('node_id') if i < len(batch) else None) for i in range(self.workers) ]}"
+        )
         yield Event(
             author=self.name,
             invocation_id=ctx.invocation_id,

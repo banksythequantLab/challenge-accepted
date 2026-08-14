@@ -24,7 +24,8 @@ param(
     # -AgentEngineId empty and Memory Bank stays off; /api/healthz will say so.
     [string]$AgentEngineId = "3470843198807474176",
     [string]$AgentEngineLocation = "us-central1",
-    [switch]$KeepWarm   # min-instances=1: use from the day you start rehearsing
+    [switch]$KeepWarm,  # min-instances=1: use from the day you start rehearsing
+    [switch]$ForgeDebug # CA_FORGE_DEBUG=1: make the FORGE phase say what it is doing
 )
 
 # NOT "Stop". gcloud writes advisories to STDERR -- e.g.
@@ -93,6 +94,13 @@ $envList = @(
     "CA_MODEL_REASONING=$ModelReasoning",
     "CA_MODEL_CHEAP=$ModelCheap"
 )
+if ($ForgeDebug) {
+    # FORGE narrates itself into Cloud Logging. On for as long as "six specs, one tool"
+    # is unexplained; a worker that does nothing is otherwise indistinguishable from a
+    # worker with nothing to do.
+    $envList += "CA_FORGE_DEBUG=1"
+    Write-Host "==> FORGE debug tracing ON" -ForegroundColor Yellow
+}
 if ($AgentEngineId) {
     $envList += "AGENT_ENGINE_ID=$AgentEngineId"
     $envList += "AGENT_ENGINE_LOCATION=$AgentEngineLocation"
