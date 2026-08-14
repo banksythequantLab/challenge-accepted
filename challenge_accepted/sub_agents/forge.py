@@ -108,6 +108,20 @@ def _code_executor() -> BuiltInCodeExecutor:
     return BuiltInCodeExecutor()
 
 
+def _worker_config() -> types.GenerateContentConfig:
+    """`include_server_side_tool_invocations`, but only where it is legal.
+
+    Vertex raises on the parameter itself, so it cannot be set-and-ignored -- it has to
+    be absent. `config.use_vertex_models()` reads the same `GOOGLE_GENAI_USE_VERTEXAI`
+    the genai client uses to choose its mode, so the two cannot disagree.
+    """
+    if config.use_vertex_models():
+        return types.GenerateContentConfig()
+    return types.GenerateContentConfig(
+        tool_config=types.ToolConfig(include_server_side_tool_invocations=True),
+    )
+
+
 def _worker(index: int) -> LlmAgent:
     """One Toolwright.
 
@@ -122,6 +136,23 @@ def _worker(index: int) -> LlmAgent:
     That flag is what lets a single worker both execute code AND call `save_tool`.
     Found by running it; there is no way to hit this from tests that never call a model.
     Keep this agent's tool surface minimal regardless -- `save_tool` only.
+
+    **And it is only legal on the Gemini Developer API.** Sending it to Vertex fails:
+
+        ValueError: include_server_side_tool_invocations parameter is only supported in
+        Gemini Developer API mode, not in Gemini Enterprise Agent Platform mode.
+
+    Local runs use a `GOOGLE_API_KEY` (Developer API) and need the flag. The deployed
+    service sets `GOOGLE_GENAI_USE_VERTEXAI=TRUE` and is destroyed by it. So the fix for
+    one environment was, unnoticed, the outage in the other: **every Toolwright on every
+    deployed revision died**, and the goal graph, journal, party and dashboard all
+    carried on looking perfect around the hole. Ten challenges in production Firestore,
+    every agent-driven one with `tools: []`, while local runs built four to six every
+    time and the README recorded that as verified.
+
+    Nothing surfaced it because the failure is invisible from every direction we were
+    looking: the deploy succeeds, `/api/healthz` is green, the UI renders, the FORGE
+    rail animates, and the tool count nobody was asserting on is zero.
     """
     return LlmAgent(
         name=f"toolwright_{index}",
@@ -141,9 +172,7 @@ def _worker(index: int) -> LlmAgent:
         # save_tool call, pure wasted tokens. With contents suppressed it sees only its
         # instruction plus the injected slot, so an empty slot reliably means idle.
         include_contents="none",
-        generate_content_config=types.GenerateContentConfig(
-            tool_config=types.ToolConfig(include_server_side_tool_invocations=True),
-        ),
+        generate_content_config=_worker_config(),
     )
 
 

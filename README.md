@@ -395,6 +395,42 @@ exists. Cloud Trace now has `CA_TRACE_TO_CLOUD`, off by default, and the exporte
 Three subsystems on one boolean, found one at a time, each by a different method:
 reading the diff, reading the vendor's source, and reading a crash log.
 
+### Fixed: the feature cost 1.8s a turn, and the fix for that broke it
+
+`preload_memory` runs on every LLM request for Warden and the Interviewer. Measured
+against the live Agent Engine, a search for a user with **no** memories takes a median
+of **1810 ms** (n=6, min 1655, max 2344) and returns nothing. That is every judge, on
+every turn of a nine-question interview, waiting to be told they have no past.
+
+"This user has no memories" is the one search result that does not depend on the query,
+so it is the one result safe to cache. Hits are never cached — those are semantic
+matches against what the user just typed, and serving turn one's matches on turn four
+trades recall quality for latency.
+
+**The first version of that cache shipped, deployed, and broke recall.** Ten minutes
+later `scripts\check_memory.py` failed: four fresh sessions, nothing recalled. Listing
+the Agent Engine's memories directly showed both facts present and correct, written at
+20:57:15 — so the write was fine and the app had simply stopped looking.
+
+```
+T+0     turn one — preload searches, finds nothing, marks empty (TTL 300s)
+T+90    save_charter writes to Memory Bank, clears the marker
+T+95    later agents in the same turn preload again. Generation takes ~30s, so the
+        search is STILL empty — and re-arms the marker for a fresh 300s
+T+135+  every probe lands inside that window and skips the search entirely
+```
+
+Clearing the marker on write was not enough, because the write is asynchronous
+server-side and the next search races it. A user this process has ever written for is
+now never cached as empty again: for them an empty result is transient by definition.
+
+Two things about this are worth more than the fix. The unit tests passed the whole
+time — they exercised `mark_empty` and `forget_empty` in the order the code intended,
+not the order production produced. And the bug was only ever visible from outside:
+memories present, app silent, nothing in the logs, every status green. It took a check
+that drives the real product across a session boundary to see it, which is the same
+lesson as every other entry in this section.
+
 The architecture diagram used to draw Memory Bank, Agent Sessions and a persistent
 Agent Engine code sandbox as though all three were running. They were not, so they were
 drawn dashed and labelled **NOT WIRED — PLANNED** against a legend explaining the

@@ -54,6 +54,17 @@ MAX_NODES: int = int(os.getenv("CA_MAX_NODES", "20"))
 FORGE_WORKERS: int = int(os.getenv("CA_FORGE_WORKERS", "4"))
 
 
+def use_vertex_models() -> bool:
+    """True when the genai client talks to Vertex rather than the Developer API.
+
+    This is the same variable `google-genai` itself reads, deliberately: the moment our
+    idea of the mode and the client's diverge, we start sending parameters one of them
+    considers illegal. That is not hypothetical -- it silently killed every Toolwright
+    on every deployed revision. See `sub_agents/forge._worker_config`.
+    """
+    return os.getenv("GOOGLE_GENAI_USE_VERTEXAI", "").strip().lower() in {"1", "true"}
+
+
 def use_memory_bank() -> bool:
     """True when an Agent Engine exists to host Vertex AI Memory Bank."""
     return bool(GOOGLE_CLOUD_PROJECT and AGENT_ENGINE_ID)
