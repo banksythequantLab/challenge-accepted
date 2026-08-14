@@ -48,17 +48,26 @@ python main.py                     # http://localhost:8080/app
 | **2:20–2:50** | Party tab → **Invite** → paste into the incognito window | "Two of us are on this." Click **Invite**, paste the link in the second window. The header goes **1 → 2 in party** on *your* screen, without you touching it. Then have Dana type a discovery — *"the repo has to be public at submission, not just shared with judges"* — and **cut back to your own screen**: it is sitting in your Party Knowledge. "Nobody told me that. I inherited it." |
 | **2:50–3:05** | Thumbs down on a tool + reason | "And when something isn't useful, I say so —" click 👎, type a **specific** reason into the inline box ("too generic, I want my own numbers in it") "— and the next generation is built from that sentence. Not a rating. The words." Then ask the agents to rebuild that step and let the new spec's rationale name your objection. |
 | **3:05–3:20** | Click **Copy for Claude** on a quest, paste into Claude | "The work doesn't end in my app. One click copies the step, the goal it serves, and the source of the tool it built — straight into whatever I'm already using." Paste it. Let the paste land on screen. |
-| **3:20–3:35** | Architecture diagram, then Cloud Console | "Nine agents on Google ADK and Gemini 3.6 Flash, deployed on Cloud Run with Firestore as the shared source of truth." Show the Cloud Run console with the service running. Show `/api/healthz` reading `"store":"firestore"`. |
-| **3:35–3:45** | `docs\business_model.html`, full-screened | "Nineteen dollars solo, twenty-nine a seat for teams. Measured cost is about 86 cents a challenge." Show the live Cloud Run URL on screen. |
+| **3:20–3:35** | Architecture diagram, then Cloud Console | "Nine agents on Google ADK and Gemini 3.6 Flash, deployed on Cloud Run, with Firestore as the shared source of truth and Vertex AI Memory Bank remembering me between challenges." Show the Cloud Run console with the service running. Show `/api/healthz` reading `"store":"firestore"` **and** `"memory":"agentengine"` — one payload, both claims, on screen. |
+| **3:35–3:45** | `docs\business_model.html`, full-screened | "Nineteen dollars solo, twenty-nine a seat for teams. Measured cost is about 86 cents a challenge." Show **challengeaccepted.app** in the address bar. |
 
-> **Say "Vertex AI Memory Bank" nowhere.** It is not wired — `use_vertex()` is false and
-> the architecture diagram marks it *NOT WIRED — PLANNED*. Claiming it on camera is the
-> one thing that could turn an honest submission into a dishonest one. "Firestore as the
-> shared source of truth" is both true and the better line anyway.
-
-> **Say "challengeaccepted.app" only if you have actually mapped the domain** by
-> recording day. Otherwise read out the Cloud Run URL. Do not point judges at a domain
-> that 404s.
+> **Both of the old warnings here have flipped. Read this before recording.**
+>
+> **You can now say "Vertex AI Memory Bank" — and you should.** It is wired at both ends
+> and proven live: `preload_memory` on Warden and the Interviewer, written by
+> `save_charter` and `complete_node`, against Agent Engine `3470843198807474176` in
+> us-central1. `/api/healthz` says `"memory":"agentengine"`. If you want it on camera in
+> ten seconds, the shot is: finish a challenge, open a **new** session as the same user,
+> ask *"what do you already know about me?"*, and let it answer with something you said
+> in the previous conversation. `scripts\check_memory.py` does exactly that and passes.
+>
+> Say it precisely: it is **personal recall across challenges**, scoped to
+> `(app_name, user_id)`. The party's shared knowledge is Firestore group facts. Calling
+> Memory Bank "shared team memory" would be the one overclaim available to you here.
+>
+> **`challengeaccepted.app` is live** — apex and `www`, valid certificate, both serving
+> the dashboard. Use it. The Cloud Run URL still works and is fine as a fallback if the
+> demo machine has a stale DNS cache, but the domain is the better thing on screen.
 
 ---
 

@@ -17,9 +17,14 @@ Built for the [All Things Agentic hackathon](https://allthingsagentichackathon.d
 
 **v0.4 -- deployed, and driven end to end from the browser.**
 
-**Live:** https://challenge-accepted-xk3m7ygefa-uc.a.run.app/app
-(dashboard) · [`/`](https://challenge-accepted-xk3m7ygefa-uc.a.run.app/) (ADK dev UI) ·
-[`/api/healthz`](https://challenge-accepted-xk3m7ygefa-uc.a.run.app/api/healthz)
+**Live:** **https://challengeaccepted.app/app** (dashboard) ·
+[`/`](https://challengeaccepted.app/) (ADK dev UI) ·
+[`/api/healthz`](https://challengeaccepted.app/api/healthz)
+
+`www` works too, and the Cloud Run URL
+([challenge-accepted-xk3m7ygefa-uc.a.run.app](https://challenge-accepted-xk3m7ygefa-uc.a.run.app/app))
+still answers -- the domain mapping is additive, so nothing that already pointed at the
+service broke.
 
 | | |
 |---|---|
@@ -32,11 +37,13 @@ Built for the [All Things Agentic hackathon](https://allthingsagentichackathon.d
 | Verified live | **Two users, one challenge.** Dana joins a session Derek started; her Coach opens with *"Derek found Cloud Run requires billing... so we're using Render and Vercel instead"* and hands her a ready node. This is the demo beat |
 | Verified | **A joining teammate is handed live work, not finished work.** This row said *Not verified* for weeks. `scripts\check_handoff.py` now drives it: Dana joins cold on a challenge with two closed nodes and asks what to pick up. She gets both party facts (one attributed to Derek by name) and is pointed at an open node; neither finished node is named |
 | Verified live | **Deployed to Cloud Run**, Firestore-backed (`store=firestore`), agents served from Vertex AI. Gemini 3.x lives on the Vertex **global** endpoint, not a regional one |
+| Verified live | **`challengeaccepted.app` serves the dashboard over HTTPS**, apex and `www`. Domain mappings report `Ready=True` / `CertificateProvisioned=True`; both hosts return 200 with a validated chain from two independent clients. DNS is nine grey-cloud records at Cloudflare -- proxied would have blocked the certificate forever |
+| Verified live | **Vertex AI Memory Bank remembers across challenges.** A session with no `challenge_id` and no `group_id` recalled facts from a previous challenge -- `scripts\check_memory.py`. `/api/healthz` reports `memory=agentengine`, `sessions=firestore` |
 | Verified live | The dashboard **drives** the agents: chat panel opens an ADK session, streams `/run_sse`, and renders text, tool calls and code execution as they happen. One scripted browser run: 15 quest nodes drawn, 4 tools forged, title auto-filled, zero console errors |
 | Verified | Losing the session mid-conversation (deleted server-side, exactly as a Cloud Run restart does) recovers without a reload -- `scripts\check_session_recovery.py` |
 | Verified | Every copy-to-clipboard path returns the right markdown, on desktop and on an iPhone 13 viewport -- `scripts\check_copy.py` reads the clipboard back and asserts on content |
 | Built | Conversations persist in Firestore via a custom `BaseSessionService`, registered under a `firestore://` scheme through ADK's own service registry. Survives an instance swap and a redeploy |
-| Not built | Vertex AI Memory Bank. `use_vertex()` is false. See Known issues |
+| Not built | Group-scoped memory. Memory Bank is per-user by design; the party's shared memory is still Firestore `group_facts`. See Next |
 | Not built | Firebase Auth. Users are anonymous ids in `localStorage` |
 
 Reproduce with `python scripts\live_walk.py` (costs ~$0.86, prints full token accounting).
@@ -389,14 +396,17 @@ Three subsystems on one boolean, found one at a time, each by a different method
 reading the diff, reading the vendor's source, and reading a crash log.
 
 The architecture diagram used to draw Memory Bank, Agent Sessions and a persistent
-Agent Engine code sandbox as though all three were running. They were not. Memory Bank
-is solid now because it is genuinely running; the sandbox card stays dashed and
-labelled **NOT WIRED — PLANNED**, with a legend explaining the
-convention, and the code-execution card names the `BuiltInCodeExecutor` actually in use.
-The top band claimed a Next.js client with Firebase Auth and React Flow; the real client
-is one static HTML file with anonymous ids in `localStorage`, and it says that now.
+Agent Engine code sandbox as though all three were running. They were not, so they were
+drawn dashed and labelled **NOT WIRED — PLANNED** against a legend explaining the
+convention. Every one of them is real now — Memory Bank last — so no card is dashed any
+more, and the legend says exactly that rather than describing a convention nothing
+uses. The code-execution card names the `BuiltInCodeExecutor` actually in play and says
+what would replace it. The top band once claimed a Next.js client with Firebase Auth and
+React Flow; the real client is one static HTML file with anonymous ids in
+`localStorage`, and it says that now.
 
-A diagram that describes what you wish you had built is worth less than no diagram.
+A diagram that describes what you wish you had built is worth less than no diagram —
+and a legend nobody can find an example of is the same failure in miniature.
 
 **The client-side belt to that braces.** Even with durable sessions, a client can hold
 an id the server will not honour — a wiped collection, a session deleted out from
@@ -787,12 +797,14 @@ docs/                 plan + architecture diagram
    `group_id`; the obvious risk is writing one person's private context into a group
    everyone can read, so it needs a rule about what is shareable before it needs code.
 2. Firebase Auth, replacing the anonymous `localStorage` ids.
-3. **Map `challengeaccepted.app`.** Everything on our side is done; waiting on Google's
-   certificate.
+3. ~~**Map `challengeaccepted.app`.**~~ **Done.** Both mappings report `Ready=True` and
+   `CertificateProvisioned=True`; `https://challengeaccepted.app/app` and the `www` host
+   both serve the dashboard. Kept here because the route to it has three traps worth
+   remembering.
 
-   Ownership is verified in Search Console (`gcloud domains list-user-verified` now
-   returns 16 domains including this one). Domain mappings exist for the apex and `www`.
-   All nine DNS records are live in Cloudflare and resolving:
+   Ownership is verified in Search Console (`gcloud domains list-user-verified` returns
+   16 domains including this one). Domain mappings exist for the apex and `www`. All
+   nine DNS records are live in Cloudflare:
 
    ```
    A     challengeaccepted.app      216.239.32.21 .34.21 .36.21 .38.21
@@ -801,16 +813,21 @@ docs/                 plan + architecture diagram
    TXT   challengeaccepted.app      google-site-verification=...   (do not delete)
    ```
 
-   Both mappings report `DomainRoutable=True` and `CertificateProvisioned=Unknown /
-   CertificatePending`. That is Google's queue, not a misconfiguration -- managed
-   certificates take anywhere from fifteen minutes to a day. Until it lands, TLS to the
-   apex fails at the handshake, which reads alarming and is expected.
+   **Trap one: the certificate takes its time, and the failure looks like a bug.** The
+   mappings sat at `CertificateProvisioned=Unknown / CertificatePending` for roughly an
+   hour after DNS went in, and TLS to the apex failed at the handshake the whole time.
+   That is Google's queue -- managed certificates take anywhere from fifteen minutes to
+   a day. Nothing to fix, and nothing that says so.
+
+   **Trap two: verification is a separate gate from DNS.** Before Search Console
+   verification the mapping returns `PermissionDenied` and refuses to become routable,
+   no matter how correct the records are.
 
    Records were imported as a BIND zone file rather than typed in nine times, with
    Cloudflare's **"Proxy imported DNS records" left unchecked**. Verified by resolving
    them afterwards rather than by trusting the confirmation screen.
 
-   **Grey cloud is load-bearing, not a preference.** Proxied, Google can never complete
+   **Trap three: grey cloud is load-bearing, not a preference.** Proxied, Google can never complete
    the challenge that issues the managed certificate, and the mapping sits at
    `CertificatePending` indefinitely with nothing in the error to tell you why. It also
    keeps Cloudflare out of the path of the SSE event stream the live feed depends on.
@@ -822,8 +839,8 @@ docs/                 plan + architecture diagram
    work on a free plan, but it puts a proxy in front of an SSE stream for no gain over
    DNS-only.
 
-   Until the certificate provisions, the Cloud Run URL is the only address worth putting
-   on camera -- and `docs\DEMO_SCRIPT.md` says so.
+   `docs\DEMO_SCRIPT.md` used to say the Cloud Run URL was the only address worth
+   putting on camera. That is no longer true -- point it at `challengeaccepted.app`.
 
 ---
 
