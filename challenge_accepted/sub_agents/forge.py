@@ -139,6 +139,48 @@ def _worker_config() -> types.GenerateContentConfig:
     )
 
 
+def _strip_code_ids(callback_context, llm_request):
+    """Remove the `id` Vertex refuses to accept back on code parts.
+
+    The bug this fixes killed FORGE on every deployed revision, and it hid behind the
+    first one. A Toolwright's first model call succeeds and comes back with an
+    `executableCode` part carrying an `id`. ADK keeps that part in the agent's history.
+    The worker's *second* call sends the history back, and `google-genai` refuses to
+    convert it:
+
+        ValueError: id parameter is only supported in Gemini Developer API mode, not in
+        Gemini Enterprise Agent Platform mode.
+          File "google/genai/models.py", line 1188, in _ExecutableCode_to_vertex
+
+    `_CodeExecutionResult_to_vertex` has the identical guard, so both part types matter.
+
+    Why exactly one tool got built, every time: the workers run inside an
+    `asyncio.TaskGroup`, where one failure cancels its siblings. Whichever worker
+    reached a second model call first raised, and took the other three down with it
+    mid-build. The trace makes it unambiguous -- four workers START with four distinct
+    specs, one saves, none reach END, the loop never runs a second iteration, and the
+    dashboard shows a finished-looking challenge with one tool.
+
+    Nothing about that is visible from outside, which is why it survived weeks of green
+    deploys: no worker logs an error, ADK folds the sub-exception into an
+    `ExceptionGroup`, and a phase that builds one of seven tools renders exactly like a
+    phase that only needed one.
+    """
+    if not config.use_vertex_models():
+        return None
+    stripped = 0
+    for content in llm_request.contents or []:
+        for part in getattr(content, "parts", None) or []:
+            for attr in ("executable_code", "code_execution_result"):
+                blob = getattr(part, attr, None)
+                if blob is not None and getattr(blob, "id", None) is not None:
+                    blob.id = None
+                    stripped += 1
+    if stripped:
+        _trace(f"stripped {stripped} code-part id(s) Vertex would have rejected")
+    return None
+
+
 def _saw_its_slot(index: int):
     """Did this worker start, and was there anything in its inbox when it did?
 
@@ -221,6 +263,9 @@ def _worker(index: int) -> LlmAgent:
         generate_content_config=_worker_config(),
         before_agent_callback=_saw_its_slot(index),
         after_agent_callback=_finished(index),
+        # Runs on EVERY model call, including the second one inside a single build --
+        # which is the one that was killing the phase. See `_strip_code_ids`.
+        before_model_callback=_strip_code_ids,
     )
 
 
