@@ -32,7 +32,8 @@ service broke.
 | Verified live | **FORGE builds tools on the deployed service** -- as of `00018-7zs`, and not before it. Every earlier revision produced `tools: []` |
 | Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
 | Verified | 128 tests pass against a real ADK `Runner`, plus 15 live checks that drive the actual controls; FastAPI boots, `/api/healthz` 200 |
-| Open, measured | **FORGE finishes one spec in six on the deployed service.** `scripts\check_forge_live.py`: Quartermaster asked for 6 tools, 1 was built, and only `toolwright_1` made a single call -- workers 0, 2 and 3 did nothing at all. No errors anywhere. This is the demo's centrepiece and it is not fixed |
+| Verified live | **FORGE builds a full batch of tools on the deployed service.** `scripts\check_forge_live.py`: all four Toolwrights execute code and save, concurrently. Before the fix it was **1 tool of 7 with three workers silently cancelled**; measured runs since are 4 and 5 |
+| Open, measured | The **tail** of the queue. A batch is 4 workers wide; when the Quartermaster asks for 7, the loop's later iterations do not always finish inside the turn -- last run built 4 of 7. That is a queue-drain question, not the outage it used to be, and the check fails on it rather than rounding it up |
 | Measured | One full challenge (12 nodes, 6 tools) = **243k prompt / 66k billed output, ~$0.86**. Break-even at $29/seat ≈ **34 challenges/user/month** |
 | Fixed | The "exactly 4 tools" ceiling. Two causes, both live-only. See Known issues. |
 | Verified live | CLIMB end to end: node closed on evidence, feedback captured with reason, blocker -> group fact -> interview re-opened -> graph redrawn around the constraint |
@@ -396,6 +397,77 @@ exists. Cloud Trace now has `CA_TRACE_TO_CLOUD`, off by default, and the exporte
 
 Three subsystems on one boolean, found one at a time, each by a different method:
 reading the diff, reading the vendor's source, and reading a crash log.
+
+### Fixed: two Vertex-illegal parameters, and the second hid behind the first
+
+The money shot had never run on the deployed service. Not degraded -- **zero tools**, on
+every revision, while local runs built four to six every time and this README recorded
+that as *Verified live*. Ten challenges in production Firestore, every agent-driven one
+with `tools: []`, and nothing that looked wrong from any angle anyone was checking: the
+deploy green, `/api/healthz` green, the graph drawn, the journal filling, the FORGE rail
+animating around an empty result.
+
+**The first parameter.** `include_server_side_tool_invocations` is *required* on the
+Gemini Developer API to let one agent both execute code and call a function -- without
+it the API rejects the whole request. On Vertex the same parameter **raises**. Local
+runs use a `GOOGLE_API_KEY`; the deploy sets `GOOGLE_GENAI_USE_VERTEXAI=TRUE`. The fix
+for one environment was, silently, the outage in the other.
+
+Fixing that took production from 0 tools to exactly 1 -- of 6, then of 7. Always
+exactly one, which is the shape of a bug rather than a shortfall.
+
+**The second parameter, found by making the phase talk.** A worker that does nothing and
+a worker with nothing to do produce identical output, so `CA_FORGE_DEBUG=1` now has the
+Dispatcher and every Toolwright narrate themselves into Cloud Logging. The trace was
+unambiguous:
+
+```
+[FORGE] dispatch: specs=7 batch=4 remaining=3 escalate=False
+        slots=['medical-readiness-check', 'baseline-5k-time-trial',
+               'training-schedule-design', 'nutrition-and-recovery-protocol']
+[FORGE] worker 0: START slot='medical-readiness-check'
+[FORGE] worker 1: START slot='baseline-5k-time-trial'
+[FORGE] worker 2: START slot='training-schedule-design'
+[FORGE] worker 3: START slot='nutrition-and-recovery-protocol'
+        ... one save_tool, no END lines, no second dispatch
+```
+
+All four started, with four correct distinct specs. None reached END. Buried under an
+`ExceptionGroup` was the real cause:
+
+```
+ValueError: id parameter is only supported in Gemini Developer API mode, not in
+Gemini Enterprise Agent Platform mode.
+  File "google/genai/models.py", line 1188, in _ExecutableCode_to_vertex
+```
+
+A worker's *first* model call succeeds and returns an `executableCode` part carrying an
+`id`. ADK keeps it in history. The worker's *second* call sends that history back, and
+`google-genai` refuses to convert it. `_CodeExecutionResult_to_vertex` has the identical
+guard.
+
+And workers run inside an `asyncio.TaskGroup`, where **one failure cancels its
+siblings**. So whichever worker reached a second model call first raised, and took the
+other three down mid-build. Exactly one tool, every time, from whichever worker happened
+to finish first.
+
+`_strip_code_ids` is a `before_model_callback` that clears those ids in Vertex mode
+only. Four tests pin it, and one of them runs the stripped history through
+`google.genai`'s real `_Part_to_vertex` rather than a fake -- that is the assertion that
+would have caught this before it shipped.
+
+Measured on the deployed service, before and after: **1 tool of 7, three workers
+silently cancelled** -> **4 and 5 tools, all four workers executing code and saving
+concurrently**.
+
+Two things this cost that are worth naming. `scripts\check_forge_live.py` exists because
+counting tools alone cannot distinguish "built everything it meant to" from "gave up
+after one" -- for that you need the Quartermaster's specs, which live only in session
+state because an agent with an `output_schema` gets no tools and cannot journal what it
+decided. And the first version of that check **passed on the run that finally worked**,
+reporting `specs asked: 0`, because its state walker missed a nested key. A check that
+passes by failing to look is worse than no check; it now fails when it cannot read the
+specs.
 
 ### Fixed: the feature cost 1.8s a turn, and the fix for that broke it
 

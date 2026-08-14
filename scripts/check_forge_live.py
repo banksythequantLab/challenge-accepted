@@ -78,16 +78,43 @@ def _say(base, user, sid, text):
 
 
 def _specs_from_state(state):
-    """Every ToolSpec the Quartermaster produced, wherever FORGE parked it."""
+    """Every ToolSpec the Quartermaster produced, wherever FORGE parked it.
+
+    The first version of this walked one level and missed `tool_specs`, which is a dict
+    of `{"specs": [...]}` rather than a bare list. So on the run that finally worked it
+    reported `specs asked: 0` and PASSED -- with nothing to compare against. A check
+    that can pass by failing to look is worse than no check, so `main` now treats an
+    unreadable spec set as a failure rather than a pass.
+    """
     specs = []
+
+    def _harvest(value):
+        if isinstance(value, str):
+            try:
+                value = json.loads(value)
+            except json.JSONDecodeError:
+                return
+        if isinstance(value, dict):
+            if value.get("node_id") or value.get("name"):
+                specs.append(value)
+            else:
+                for nested in value.values():
+                    _harvest(nested)
+        elif isinstance(value, list):
+            for item in value:
+                _harvest(item)
+
     for key, value in (state or {}).items():
-        if "spec" not in key and "forge" not in key:
-            continue
-        items = value if isinstance(value, list) else [value]
-        for item in items:
-            if isinstance(item, dict) and (item.get("node_id") or item.get("name")):
-                specs.append(item)
-    return specs
+        if "spec" in key or "forge" in key:
+            _harvest(value)
+    # A spec can be parked in a slot AND in the queue at once; count each node once.
+    seen, unique = set(), []
+    for s in specs:
+        node = s.get("node_id") or s.get("name")
+        if node not in seen:
+            seen.add(node)
+            unique.append(s)
+    return unique
 
 
 def main(base: str) -> int:
@@ -137,7 +164,11 @@ def main(base: str) -> int:
     if not tools:
         print("\nFAIL: the deployed service built nothing. This is the money shot.")
         return 1
-    if wanted and len(tools) < len(wanted):
+    if not wanted:
+        print("\nFAIL: tools exist but no specs were readable, so completeness is "
+              "unverified. Passing here would mean passing because we did not look.")
+        return 1
+    if len(tools) < len(wanted):
         print(f"\nFAIL: {len(wanted) - len(tools)} spec(s) never became a tool. FORGE "
               "started and did not finish -- which looks identical to success from "
               "the dashboard.")
