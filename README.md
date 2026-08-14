@@ -787,28 +787,34 @@ docs/                 plan + architecture diagram
    `group_id`; the obvious risk is writing one person's private context into a group
    everyone can read, so it needs a rule about what is shareable before it needs code.
 2. Firebase Auth, replacing the anonymous `localStorage` ids.
-3. **Map `challengeaccepted.app`.** Verified and routable; waiting on DNS records.
+3. **Map `challengeaccepted.app`.** Everything on our side is done; waiting on Google's
+   certificate.
 
-   Ownership is verified in Search Console, so `gcloud domains list-user-verified` now
-   returns 16 domains including this one. Domain mappings exist for the apex and `www`,
-   and both report `DomainRoutable=True` with `Ready=Unknown / CertificatePending` --
-   Google has accepted the domain and is waiting to be pointed at.
+   Ownership is verified in Search Console (`gcloud domains list-user-verified` now
+   returns 16 domains including this one). Domain mappings exist for the apex and `www`.
+   All nine DNS records are live in Cloudflare and resolving:
 
-   Nine records go in Cloudflare, all **DNS only** (grey cloud): four A and four AAAA at
-   the apex, and `www` CNAME to `ghs.googlehosted.com.`. Read them from
-   `status.resourceRecords` on the mapping rather than from anyone's memory:
-
-   ```powershell
-   $tok = gcloud auth print-access-token
-   irm -Headers @{Authorization="Bearer $tok"} `
-     "https://us-central1-run.googleapis.com/apis/domains.cloudrun.com/v1/namespaces/$PROJECT/domainmappings/challengeaccepted.app" |
-     % { $_.status.resourceRecords }
    ```
+   A     challengeaccepted.app      216.239.32.21 .34.21 .36.21 .38.21
+   AAAA  challengeaccepted.app      2001:4860:4802:{32,34,36,38}::15
+   CNAME www.challengeaccepted.app  ghs.googlehosted.com.
+   TXT   challengeaccepted.app      google-site-verification=...   (do not delete)
+   ```
+
+   Both mappings report `DomainRoutable=True` and `CertificateProvisioned=Unknown /
+   CertificatePending`. That is Google's queue, not a misconfiguration -- managed
+   certificates take anywhere from fifteen minutes to a day. Until it lands, TLS to the
+   apex fails at the handshake, which reads alarming and is expected.
+
+   Records were imported as a BIND zone file rather than typed in nine times, with
+   Cloudflare's **"Proxy imported DNS records" left unchecked**. Verified by resolving
+   them afterwards rather than by trusting the confirmation screen.
 
    **Grey cloud is load-bearing, not a preference.** Proxied, Google can never complete
    the challenge that issues the managed certificate, and the mapping sits at
    `CertificatePending` indefinitely with nothing in the error to tell you why. It also
    keeps Cloudflare out of the path of the SSE event stream the live feed depends on.
+   Cloudflare will nag you to switch them to proxied -- it is wrong about this one.
 
    The tempting Cloudflare-side alternative -- a proxied CNAME plus an Origin Rule
    rewriting the `Host` header to the `run.app` hostname -- is not available: Host header
