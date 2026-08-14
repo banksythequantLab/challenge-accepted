@@ -28,9 +28,11 @@ service broke.
 
 | | |
 |---|---|
-| Verified live | 8-turn interview -> charter saved -> 12-node DAG -> 6 tools built, smoke-tested and persisted |
+| Verified **locally** | 8-turn interview -> charter saved -> 12-node DAG -> 6 tools built, smoke-tested and persisted. This row said *Verified live* for weeks and was wrong: it was only ever true against a local server on a `GOOGLE_API_KEY`. On the deployed service every Toolwright was dying. See Known issues |
+| Verified live | **FORGE builds tools on the deployed service** -- as of `00018-7zs`, and not before it. Every earlier revision produced `tools: []` |
 | Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
-| Verified | 116 tests pass against a real ADK `Runner`, plus 15 live checks that drive the actual controls; FastAPI boots, `/api/healthz` 200 |
+| Verified | 128 tests pass against a real ADK `Runner`, plus 15 live checks that drive the actual controls; FastAPI boots, `/api/healthz` 200 |
+| Open | Production now builds tools, but **one where a local run builds four to six**. No errors on the revision, so this is behaviour rather than an outage -- unproven either way, and named here rather than smoothed over |
 | Measured | One full challenge (12 nodes, 6 tools) = **243k prompt / 66k billed output, ~$0.86**. Break-even at $29/seat ≈ **34 challenges/user/month** |
 | Fixed | The "exactly 4 tools" ceiling. Two causes, both live-only. See Known issues. |
 | Verified live | CLIMB end to end: node closed on evidence, feedback captured with reason, blocker -> group fact -> interview re-opened -> graph redrawn around the constraint |
