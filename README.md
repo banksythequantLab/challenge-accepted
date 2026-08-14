@@ -25,7 +25,7 @@ Built for the [All Things Agentic hackathon](https://allthingsagentichackathon.d
 |---|---|
 | Verified live | 8-turn interview -> charter saved -> 12-node DAG -> 6 tools built, smoke-tested and persisted |
 | Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
-| Verified | 110 tests pass against a real ADK `Runner`, plus 13 browser-driven checks that click the actual controls; FastAPI boots, `/api/healthz` 200 |
+| Verified | 116 tests pass against a real ADK `Runner`, plus 15 live checks that drive the actual controls; FastAPI boots, `/api/healthz` 200 |
 | Measured | One full challenge (12 nodes, 6 tools) = **243k prompt / 66k billed output, ~$0.86**. Break-even at $29/seat ≈ **34 challenges/user/month** |
 | Fixed | The "exactly 4 tools" ceiling. Two causes, both live-only. See Known issues. |
 | Verified live | CLIMB end to end: node closed on evidence, feedback captured with reason, blocker -> group fact -> interview re-opened -> graph redrawn around the constraint |
@@ -62,7 +62,7 @@ python -m venv .venv
 .venv\Scripts\activate                 # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
 
-pytest                                 # 110 tests, no API key needed
+pytest                                 # 116 tests, no API key needed
 ```
 
 To talk to the agents you need one key. Get a free one at
@@ -299,9 +299,31 @@ The writes are synchronous now, deliberately, with a test that drives the corout
 hand and fails if it ever yields. Reads keep their thread hop: they are called from
 ordinary request handlers, not from inside a generator.
 
-### Memory Bank: wired at both ends, still switched off
+### Memory Bank: wired at both ends, and proven on the live service
 
-Until now `main.py` set `memory_service_uri` and that was the entire integration.
+**A fresh session recalls a fact from a previous challenge.** Live, on
+`challenge-accepted-00015-k4c`, `scripts\check_memory.py`:
+
+```
+>>> I can only train on Tuesday evenings, because I look after my nephew every
+    other night. The race I am aiming at is the Hollowmere parkrun 10k.
+    ... charter saved
+
+[new session -- no challenge_id, no group_id, nothing in state]
+>>> Before we start something new -- what do you already know about me?
+
+warden: Based on our previous conversation, here is what I know about you:
+  * Goal: Run the Hollowmere parkrun 10k in under 55 minutes by Christmas.
+  * Schedule Constraint: You look after your nephew every evening except
+    Tuesdays, limiting your evening training to Tuesday evenings.
+```
+
+The second session carries no `challenge_id` and no `group_id`, so no channel existed
+between those two conversations except Memory Bank. `scripts\check_memory_bank.py` sits
+underneath it and round-trips the service directly, so when the product check fails you
+can tell in one command whether the infrastructure broke or the prompt did.
+
+Until this week `main.py` set `memory_service_uri` and that was the entire integration.
 Nothing read memory and nothing wrote it, so setting `AGENT_ENGINE_ID` would have
 produced a configured service that no code path ever consulted — the same shape as the
 feedback button that recorded verdicts no reader ever queried. "The wiring exists" was
@@ -334,15 +356,42 @@ no coverage here. That is now `use_memory_bank()` and `use_vertex_sessions()`, s
 stay put unless `CA_SESSIONS=agentengine`, and `/api/healthz` reports `memory` and
 `sessions` separately so a deploy states which backends it is on.
 
-Still switched off in production: no Agent Engine exists yet, so `use_memory_bank()` is
-false and `/api/healthz` reports `"memory":"none"`. Creating one needs a `gcloud auth
-login` that has expired. **No claim is made here that Memory Bank has stored or recalled
-anything** — that is unproven until a live run does it, and there is no check in
-`scripts/` for it yet.
+**Two more subsystems were hiding behind that one flag, and both bit.**
+
+The first was caught by reading ADK's source before deploying. Its `agentengine://`
+factory branches on whether the URI contains a slash; given a bare id it reads project
+and location from `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION`. This deployment
+sets `GOOGLE_CLOUD_LOCATION=global`, because Gemini 3.x is served from the global
+endpoint — and an Agent Engine is regional, with no global form. A bare id would have
+built a Memory Bank client pointed at a region the engine does not live in, and it would
+have failed *silently*, because both ends swallow their errors by design: the app would
+have run perfectly and remembered nothing. `config.agent_engine_resource()` emits the
+full `projects/…/locations/…/reasoningEngines/…` path so the region never comes from a
+variable that means something else.
+
+The second was not caught in advance. `trace_to_cloud` shared the predicate too, so the
+first deploy with `AGENT_ENGINE_ID` set made ADK import an OpenTelemetry exporter that
+had never been in `requirements.txt`:
+
+```
+File "/app/main.py", line 70, in <module>
+  app = get_fast_api_app(
+ModuleNotFoundError: No module named 'opentelemetry.exporter'
+```
+
+Revision `00014` crash-looped before binding the port. Nothing was lost — the previous
+revision kept serving, and `deploy.ps1`'s explicit `$LASTEXITCODE` check reported the
+failure instead of printing "Deployed" over it, which is the whole reason that check
+exists. Cloud Trace now has `CA_TRACE_TO_CLOUD`, off by default, and the exporter is in
+`requirements.txt` so turning it on works.
+
+Three subsystems on one boolean, found one at a time, each by a different method:
+reading the diff, reading the vendor's source, and reading a crash log.
 
 The architecture diagram used to draw Memory Bank, Agent Sessions and a persistent
-Agent Engine code sandbox as though all three were running. They were not. Those cards
-are now dashed and labelled **NOT WIRED — PLANNED**, with a legend explaining the
+Agent Engine code sandbox as though all three were running. They were not. Memory Bank
+is solid now because it is genuinely running; the sandbox card stays dashed and
+labelled **NOT WIRED — PLANNED**, with a legend explaining the
 convention, and the code-execution card names the `BuiltInCodeExecutor` actually in use.
 The top band claimed a Next.js client with Firebase Auth and React Flow; the real client
 is one static HTML file with anonymous ids in `localStorage`, and it says that now.
@@ -722,7 +771,7 @@ challenge_accepted/
     store.py          Firestore repository, in-memory fallback
     tools.py          ADK FunctionTools over the store
 main.py               Cloud Run entrypoint via get_fast_api_app
-tests/                110 tests, no API key required
+tests/                116 tests, no API key required
 scripts/              live walkthroughs and browser-driven end-to-end checks
 deploy/               deploy.ps1, check.ps1, smoke_live.ps1, SETUP.md
 docs/                 plan + architecture diagram
@@ -730,23 +779,13 @@ docs/                 plan + architecture diagram
 
 ## Next
 
-1. **Vertex AI Memory Bank.** Read and write are both wired now -- `preload_memory` on
-   Warden and the Interviewer, `add_session_to_memory` from `save_charter` and
-   `complete_node` -- and 13 tests pin the behaviour, including that a dead memory
-   service cannot stop a charter saving. What is missing is the Agent Engine itself:
-   `use_memory_bank()` is false in production and `/api/healthz` says
-   `"memory":"none"`. Creating one needs `gcloud auth login` (the token on this machine
-   has expired), then `AGENT_ENGINE_ID` on the service and a redeploy.
-
-   **Nothing here claims Memory Bank has stored or recalled anything.** Until a live
-   run does it, the only honest statement is that the code paths exist and are tested
-   against fakes. The check that would settle it does not exist yet: run one challenge
-   to a saved charter, start a second challenge as the same user, and assert the
-   Interviewer skips a question it already has the answer to.
-
-   Note it is *personal* recall -- Memory Bank scopes to `(app_name, user_id)`. The
-   party's shared memory is `remember_group_fact` -> Firestore, and that has worked all
-   along.
+1. **Group-scoped memory.** Memory Bank is live and proven (see Known issues), but it
+   scopes to `(app_name, user_id)` -- it is personal recall across challenges. A
+   teammate joining a party does not inherit it. The party's shared memory is still
+   `remember_group_fact` -> Firestore, read wholesale into the prompt, which does not
+   scale past a few dozen facts. The obvious move is a second memory scope keyed on
+   `group_id`; the obvious risk is writing one person's private context into a group
+   everyone can read, so it needs a rule about what is shareable before it needs code.
 2. Firebase Auth, replacing the anonymous `localStorage` ids.
 3. **Map `challengeaccepted.app`.** Blocked on domain verification, not on code. The
    mapping resource now exists in `us-central1` and reports exactly what it is waiting
@@ -785,7 +824,7 @@ docs/                 plan + architecture diagram
 
 ## How this was built, and what that taught
 
-**Tests that never call a model cannot find the bugs that matter.** All 110 pass, and
+**Tests that never call a model cannot find the bugs that matter.** All 116 pass, and
 they passed the entire time the system was silently building nothing. The 4-tool
 ceiling, the delegation loop, the dropped feedback, the duplicated group facts, the
 read-only dashboard -- every one surfaced in a scripted live run with full event
