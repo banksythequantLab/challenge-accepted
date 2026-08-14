@@ -37,7 +37,7 @@ service broke.
 | Verified live | **Two users, one challenge.** Dana joins a session Derek started; her Coach opens with *"Derek found Cloud Run requires billing... so we're using Render and Vercel instead"* and hands her a ready node. This is the demo beat |
 | Verified | **A joining teammate is handed live work, not finished work.** This row said *Not verified* for weeks. `scripts\check_handoff.py` now drives it: Dana joins cold on a challenge with two closed nodes and asks what to pick up. She gets both party facts (one attributed to Derek by name) and is pointed at an open node; neither finished node is named |
 | Verified live | **Deployed to Cloud Run**, Firestore-backed (`store=firestore`), agents served from Vertex AI. Gemini 3.x lives on the Vertex **global** endpoint, not a regional one |
-| Verified live | **`challengeaccepted.app` serves the dashboard over HTTPS**, apex and `www`. Domain mappings report `Ready=True` / `CertificateProvisioned=True`; both hosts return 200 with a validated chain from two independent clients. DNS is nine grey-cloud records at Cloudflare -- proxied would have blocked the certificate forever |
+| Verified live | **`challengeaccepted.app` runs the whole product, not just the front page.** `scripts\check_memory.py` drove a four-turn interview to a saved charter and then recalled it from a fresh session, entirely over the custom domain -- session creation, `/run_sse` streaming and Memory Bank all through the new host. Apex and `www` both serve; mappings report `Ready=True` / `CertificateProvisioned=True`. DNS is nine grey-cloud records at Cloudflare -- proxied would have blocked the certificate forever |
 | Verified live | **Vertex AI Memory Bank remembers across challenges.** A session with no `challenge_id` and no `group_id` recalled facts from a previous challenge -- `scripts\check_memory.py`. `/api/healthz` reports `memory=agentengine`, `sessions=firestore` |
 | Verified live | The dashboard **drives** the agents: chat panel opens an ADK session, streams `/run_sse`, and renders text, tool calls and code execution as they happen. One scripted browser run: 15 quest nodes drawn, 4 tools forged, title auto-filled, zero console errors |
 | Verified | Losing the session mid-conversation (deleted server-side, exactly as a Cloud Run restart does) recovers without a reload -- `scripts\check_session_recovery.py` |
@@ -363,7 +363,7 @@ no coverage here. That is now `use_memory_bank()` and `use_vertex_sessions()`, s
 stay put unless `CA_SESSIONS=agentengine`, and `/api/healthz` reports `memory` and
 `sessions` separately so a deploy states which backends it is on.
 
-**Two more subsystems were hiding behind that one flag, and both bit.**
+**Two more traps were hiding behind that one flag, and both bit.**
 
 The first was caught by reading ADK's source before deploying. Its `agentengine://`
 factory branches on whether the URI contains a slash; given a bare id it reads project

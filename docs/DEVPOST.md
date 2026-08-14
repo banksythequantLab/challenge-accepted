@@ -3,6 +3,9 @@
 Paste-ready draft. Track: **Collaborative Partner**. Everything factual here was verified
 by running it. Numbers marked *measured* came from instrumented live runs, not estimates.
 
+**Try it:** https://challengeaccepted.app/app · health:
+https://challengeaccepted.app/api/healthz
+
 ---
 
 ## Inspiration
@@ -51,7 +54,17 @@ warden  (coordinator, gemini-3.6-flash)
 ```
 
 **Stack:** Google ADK 2.6.3 · Gemini 3.6 Flash + 3.5 Flash-Lite · Cloud Run · Firestore ·
-Vertex AI Memory Bank + Sessions · Agent Runtime code execution · FastAPI · Firebase Auth.
+Vertex AI Memory Bank on Agent Engine · FastAPI.
+
+Three things that line does *not* claim, because they are not true and a stack list is
+the easiest place in a submission to lie by omission:
+
+- **Sessions are not Agent Engine sessions.** They run on a `BaseSessionService` we
+  wrote against Firestore, registered under a `firestore://` scheme through ADK's own
+  service registry. That was a deliberate build, not a fallback — see *Challenges*.
+- **Code execution is ADK's `BuiltInCodeExecutor`**, model-side, not a persistent Agent
+  Runtime sandbox. One env var swaps it; the env var is unset.
+- **There is no Firebase Auth.** Users are anonymous ids in `localStorage`.
 
 **Data sources:** user conversation, Google Search grounding (gated, not default-on), and
 the group's own accumulated memory.
@@ -126,6 +139,22 @@ don't call a model — which is the actual lesson.
   anywhere in the codebase, so "tell it what didn't work and the next one is different" was
   false. It had gone unnoticed because the reason box was a native `window.prompt()`, which
   blocks the page and every browser check driving it. An untestable control rots.
+- **Three unrelated subsystems riding on one boolean.** `use_vertex()` gated sessions,
+  memory *and* Cloud Trace. Switching on Memory Bank would therefore also have moved
+  every conversation off our Firestore session service onto Agent Engine — nothing would
+  have errored; sessions would just have been served by code with no coverage in this
+  repo. Splitting it exposed a second trap by reading ADK's source: given a *bare* engine
+  id, its `agentengine://` factory reads the region from `GOOGLE_CLOUD_LOCATION`, which
+  we set to `global` because Gemini 3.x is served from the global endpoint. An Agent
+  Engine is regional. That would have built a Memory Bank client aimed at a region the
+  engine doesn't live in — and failed **silently**, because both ends swallow their
+  errors by design, so the app would have run perfectly and remembered nothing. We emit
+  the full resource path instead. The third only surfaced on deploy: `trace_to_cloud`
+  turned on too, and its OpenTelemetry exporter had never been in `requirements.txt`, so
+  the container died at import before binding the port. The previous revision kept
+  serving and the deploy script's explicit `$LASTEXITCODE` check reported the failure
+  rather than printing "Deployed" over it. Three subsystems, found three different ways:
+  reading the diff, reading the vendor's source, reading a crash log.
 
 ## Accomplishments we're proud of
 
@@ -140,7 +169,14 @@ don't call a model — which is the actual lesson.
   it**, with the header roster going 1 → 2 on the first person's screen while they sit
   still. Driven through two separate browser contexts, not two tabs — tabs share
   `localStorage` and would have let three real bugs pass.
-- **97 tests plus thirteen browser-driven checks**, including a regression test for every bug
+- **Memory that survives the conversation it was told in.** A brand-new session — no
+  `challenge_id`, no `group_id`, nothing in state — answered *"what do you already know
+  about me?"* with a constraint the user had mentioned during a *previous* challenge.
+  Vertex AI Memory Bank is read by ADK's `preload_memory` on Warden and the Interviewer
+  and written by `save_charter` and `complete_node`. `scripts\check_memory.py` proves it
+  end to end; `scripts\check_memory_bank.py` sits underneath and round-trips the service
+  directly, so a failure tells you whether the infrastructure or the prompt broke.
+- **116 tests plus fifteen live checks**, including a regression test for every bug
   above. The checks click the actual controls and read the clipboard, the iframe and the
   resulting prompt string back — `check_feedback.py` follows a thumbs-down all the way
   into the Quartermaster's instruction, because "the loop is closed" and "the loop is
@@ -198,3 +234,9 @@ Break-even at $29/seat is ~34 challenges per user per month — comfortably abov
   commercial launch.
 - Group memory is goal-scoped and works across users, but there is no per-node assignment
   or presence yet — two people can pick up the same node.
+- **Memory Bank is personal recall, not the party's memory.** It scopes to
+  `(app_name, user_id)`, so it carries what *you* said between *your* challenges. A
+  teammate joining a party does not inherit it. The shared layer is `remember_group_fact`
+  → Firestore, read wholesale into the prompt, which will not scale past a few dozen
+  facts. Calling Memory Bank "shared team memory" would be the easiest overclaim in this
+  submission and we are not making it.
