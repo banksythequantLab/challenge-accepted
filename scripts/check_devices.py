@@ -20,11 +20,15 @@ bracket the real ones.
   * **iPad landscape (1024px)** -- **the hole.** Above the breakpoint, far below the
     1500px the desktop checks use. Nothing has ever rendered this width.
 
-Layout is a client concern: the HTML served here is the same single file production
-serves, so testing it locally is legitimate. That is not true of agent behaviour, which
-is why the agent checks are the ones that must run against the deployed service.
+Layout is a client concern: the HTML served locally is the same single file production
+serves, so testing it locally is legitimate in a way it is not for agent behaviour. But
+"the same file" is an assumption, and this project has been bitten hard by exactly that
+class of assumption -- FORGE passed locally for weeks while building nothing in
+production. So pass a URL and it renders the deployed page instead, on the same five
+viewports, against a real challenge pulled from the live API.
 
-    python scripts\\check_devices.py
+    python scripts\\check_devices.py                            # local, seeded
+    python scripts\\check_devices.py https://challengeaccepted.app   # the deployed page
 
 Exit 0 only if every viewport passes every assertion.
 """
@@ -132,6 +136,24 @@ def _check(page, label, vw, vh) -> list[str]:
         bad.append(f"{label}: the composer is {comp['fs']:.0f}px -- iOS force-zooms "
                    "any focused input under 16px and does not zoom back")
 
+    # Text that does not fit its own box. Every numeric assertion above passed while
+    # the composer greeted the user with a sentence cut in half -- the placeholder
+    # wrapped to two lines inside a one-line textarea, and only the screenshots showed
+    # it. A width in pixels tells you nothing about whether the words fit.
+    clipped = page.evaluate(
+        """() => {
+             const out = [];
+             for (const el of document.querySelectorAll('#input,.msg .body,#title')) {
+               if (el.scrollHeight > el.clientHeight + 2)
+                 out.push((el.id || el.className) + ' needs ' + el.scrollHeight +
+                          'px, has ' + el.clientHeight);
+             }
+             return out;
+           }""")
+    _p(f"    clipped text : {clipped if clipped else 'none'}")
+    if clipped:
+        bad.append(f"{label}: text cut off by its own box -- {clipped}")
+
     # Nothing may hang off the bottom or the right of the viewport.
     spill = page.evaluate(
         """() => {
@@ -149,14 +171,43 @@ def _check(page, label, vw, vh) -> list[str]:
     return bad
 
 
-def main() -> None:
-    with socket.socket() as s:
-        if s.connect_ex(("127.0.0.1", PORT)) == 0:
-            sys.exit(f"FAIL: something is already listening on {PORT}. Kill it first.")
+def _live_challenge(base: str) -> str:
+    """A real challenge from the deployed API -- one with tools, so the map is populated.
 
-    cid = seed()
-    threading.Thread(target=serve, daemon=True).start()
-    time.sleep(2.0)
+    An empty dashboard would pass every assertion here by having nothing to lay out.
+    """
+    import json
+    import urllib.request
+
+    with urllib.request.urlopen(base.rstrip("/") + "/api/challenges?limit=25",
+                                timeout=30) as r:
+        rows = json.load(r)
+    rows = rows if isinstance(rows, list) else rows.get("challenges", [])
+    for row in rows:
+        url = f"{base.rstrip('/')}/api/challenges/{row['id']}/dashboard"
+        with urllib.request.urlopen(url, timeout=30) as r:
+            dash = json.load(r)
+        tools = dash.get("tools")
+        tools = (tools.get("tools") if isinstance(tools, dict) else tools) or []
+        nodes = (dash.get("graph") or {}).get("nodes") or []
+        if tools and nodes:
+            print(f"live challenge: {row['id']}  ({len(nodes)} nodes, {len(tools)} tools)")
+            return row["id"]
+    sys.exit("FAIL: no deployed challenge has both nodes and tools to lay out.")
+
+
+def main(base: str | None = None) -> None:
+    if base:
+        cid = _live_challenge(base)
+        origin = base.rstrip("/")
+    else:
+        with socket.socket() as s:
+            if s.connect_ex(("127.0.0.1", PORT)) == 0:
+                sys.exit(f"FAIL: something is already listening on {PORT}. Kill it first.")
+        cid = seed()
+        threading.Thread(target=serve, daemon=True).start()
+        time.sleep(2.0)
+        origin = f"http://127.0.0.1:{PORT}"
 
     failures: list[str] = []
     from playwright.sync_api import sync_playwright
@@ -177,7 +228,7 @@ def main() -> None:
                     lambda m: errors.append(m.text) if m.type == "error" else None)
             page.on("pageerror", lambda e: errors.append(str(e)))
 
-            page.goto(f"http://127.0.0.1:{PORT}/app?id={cid}", wait_until="networkidle")
+            page.goto(f"{origin}/app?id={cid}", wait_until="networkidle")
             page.wait_for_timeout(1000)
             vw = page.viewport_size["width"]
             vh = page.viewport_size["height"]
@@ -199,8 +250,9 @@ def main() -> None:
             _p(" * " + f)
         sys.exit(1)
 
-    _p(f"\nthe layout holds on all {len(DEVICES)} viewports. wrote _dev_*.png")
+    where = origin if origin.startswith("https") else "a local server"
+    _p(f"\nthe layout holds on all {len(DEVICES)} viewports, on {where}. wrote _dev_*.png")
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1] if len(sys.argv) > 1 else None)
