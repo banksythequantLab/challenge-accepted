@@ -142,8 +142,19 @@ def main() -> int:
         if pb < 2:
             bad.append(f"the teammate's screen says {pb} in party")
 
-        a.screenshot(path="_walk/party_owner.png")
-        b.screenshot(path="_walk/party_mate.png")
+        # Leave both screenshots on the Party pane -- that is the pane this check is
+        # about, and a screenshot of some other tab proves nothing about it.
+        for page, name in ((a, "owner"), (b, "mate")):
+            page.click('.tab[data-p="facts"]')
+            page.wait_for_timeout(700)
+            page.screenshot(path=f"_walk/party_{name}.png")
+        shown = b.eval_on_selector_all("#facts li", "els => els.map(e => e.innerText)")
+        _p(f"party notebook as the teammate sees it ({len(shown)}):")
+        for f in shown:
+            _p("  * " + f)
+        if not shown or any("Nothing learned yet" in f for f in shown):
+            bad.append("the teammate's Party pane says nothing has been learned, on a "
+                       "challenge with a full map and built tools")
         ctx_a.close()
         ctx_b.close()
         browser.close()
