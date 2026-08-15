@@ -38,7 +38,10 @@ TURNS = [
     "the tools.",
 ]
 
-TURN_TIMEOUT_MS = 300000
+#: Measured, not guessed: the final turn of a real run (charter -> cartographer ->
+#: quartermaster -> four Toolwrights building six tools) took 250s against production.
+#: A 300s budget was one slow model call away from calling a healthy run a failure.
+TURN_TIMEOUT_MS = 600000
 
 
 def _p(s: str) -> None:
@@ -84,14 +87,25 @@ def main(base: str) -> int:
             t = time.perf_counter()
             page.fill("#input", text)
             page.click("#send")
-            # Waiting for "a new bot bubble" was wrong: tool-call chips are bot bubbles
-            # too, so the first `write_journal` chip ended the wait while the agents were
-            # still working. That is how this script reported `nodes: 0` on a run that
-            # had simply not finished -- measuring a turn before it ends and calling the
-            # result a product failure. Wait for the app's OWN busy signal to clear.
+            # Two wrong signals so far, both of which made a working product look broken:
+            #   1. "a new bot bubble" -- tool-call chips are bot bubbles too, so the
+            #      first `write_journal` chip ended the wait immediately.
+            #   2. "the WORKING spinner is gone" -- app.html removes that placeholder the
+            #      moment the response STARTS streaming, not when it ends. That is why
+            #      this script reported turns of 3-9s and `nodes: 0`: it screenshotted a
+            #      run that was still in flight and then blamed the product. The same
+            #      conversation over raw HTTP takes minutes and saves 10 nodes.
+            # #send is disabled for exactly as long as `busy` is true, and `busy` is
+            # cleared in the stream's `finally`. That is the turn boundary.
             try:
                 page.wait_for_function(
-                    "() => !document.body.innerText.includes('WORKING')",
+                    "() => document.getElementById('send').disabled", timeout=15000)
+            except Exception:
+                problems.append(f"turn {i}: Send never went busy -- the click may "
+                                f"not have registered")
+            try:
+                page.wait_for_function(
+                    "() => !document.getElementById('send').disabled",
                     timeout=TURN_TIMEOUT_MS)
             except Exception:
                 problems.append(f"turn {i} was still WORKING after "
