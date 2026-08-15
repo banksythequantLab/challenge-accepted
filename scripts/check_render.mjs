@@ -72,6 +72,14 @@ else {
     fail('tool name missing from summary');
   if (!/judged 1 step/.test(summary)) fail('skipped specs not accounted for: ' + summary);
 }
+// The Quartermaster is allowed to decide nothing needs building. That must still be a
+// sentence -- returning null here put the whole payload back on screen as JSON.
+const noneNeeded = specSummary(JSON.stringify({
+  specs: [{ node_id: 'a', needed: false }, { node_id: 'b', needed: false }],
+}));
+if (!noneNeeded) fail('an all-skipped spec list falls back to raw JSON');
+else if (/node_id|"/.test(noneNeeded)) fail('all-skipped summary leaks wire format');
+
 if (specSummary('not json at all') !== null) fail('specSummary should return null on prose');
 if (specSummary('{"specs": []}') !== null) fail('specSummary should return null on empty specs');
 if (!process.exitCode) {

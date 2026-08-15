@@ -562,8 +562,13 @@ function specSummary(raw) {
   const specs = Array.isArray(data) ? data : data.specs;
   if (!Array.isArray(specs) || !specs.length) return null;
   const wanted = specs.filter(s => s && s.needed && s.name);
-  if (!wanted.length) return null;
   const skipped = specs.length - wanted.length;
+  //: "No tool needed anywhere" is a real answer the Quartermaster is allowed to give,
+  //: and returning null here would have put the whole payload back on screen as JSON.
+  if (!wanted.length) {
+    return `Looked at ${specs.length} step${specs.length === 1 ? '' : 's'} and judged ` +
+           `that none of them needs a tool built.`;
+  }
   const names = wanted.map(s => `${s.name}${s.tool_type ? ` (${s.tool_type})` : ''}`);
   return `Planned ${wanted.length} tool${wanted.length === 1 ? '' : 's'}` +
          (skipped ? `, and judged ${skipped} step${skipped === 1 ? '' : 's'} fine ` +
