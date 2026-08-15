@@ -63,6 +63,15 @@ def check_dashboard(data: dict) -> list[str]:
         _p(f"  - {t.get('node_id')} | {t.get('name')}"
            f"{' [DEGRADED]' if t.get('degraded') else ''}")
 
+    # The Party pane's whole promise. A teammate opening the invite link reads this.
+    party_facts = (data.get("summary") or {}).get("group_facts") or []
+    _p(f"party notebook: {len(party_facts)} fact(s)")
+    for f in party_facts:
+        _p(f"  * {f}")
+    if not party_facts:
+        bad.append("the party notebook is empty -- a teammate arrives at "
+                   "'Nothing learned yet' on a fully planned challenge")
+
     if not nodes:
         bad.append("the challenge exists but its map has no nodes")
     if not tools:

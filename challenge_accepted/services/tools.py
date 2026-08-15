@@ -73,9 +73,21 @@ _EMPTY_ANSWERS = {"", "none", "n/a", "na", "nothing", "no", "unknown", "not appl
                   "none stated", "none given", "none specified", "-"}
 
 
+#: "Solo runner (no coach or training partners)" is a stakeholder field answered with
+#: "there aren't any". Publishing it as a shared discovery to a party of one reads as
+#: a form dump. Only applied to stakeholders -- "working alone" is a real constraint.
+_SOLO_MARKERS = ("solo", "just me", "myself", "only me", "no one else", "nobody",
+                 "no coach", "no team", "no partner", "no other", "alone")
+
+
 def _is_empty_answer(text: str) -> bool:
     stripped = text.strip().strip(".").lower()
     return not stripped or stripped in _EMPTY_ANSWERS or stripped.startswith("none (")
+
+
+def _is_nobody(text: str) -> bool:
+    low = text.strip().lower()
+    return _is_empty_answer(text) or any(m in low for m in _SOLO_MARKERS)
 
 
 def _charter_facts(charter: dict[str, Any]) -> list[str]:
@@ -95,7 +107,7 @@ def _charter_facts(charter: dict[str, Any]) -> list[str]:
         if isinstance(a, str) and not _is_empty_answer(a):
             facts.append(f"Already tried: {a.strip()}")
     for s in charter.get("stakeholders") or []:
-        if isinstance(s, str) and not _is_empty_answer(s):
+        if isinstance(s, str) and not _is_nobody(s):
             facts.append(f"Also involved: {s.strip()}")
     return facts
 

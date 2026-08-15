@@ -93,6 +93,18 @@ async def main() -> int:
     check(not any(REAL_CHARTER["title"].lower() == f.lower() for f in facts),
           "the title was duplicated into the notebook; it is already the headline")
 
+    # The phrasings production actually produced for "there is nobody else". A real
+    # named stakeholder must still get through -- this filter is for empty answers,
+    # not for people.
+    for nobody in ("None (running solo)", "Solo runner (no coach or training partners)",
+                   "Just me", "N/A", "no team involved"):
+        check(not any(f.startswith(f"Also involved: {nobody}")
+                      for f in T._charter_facts({"stakeholders": [nobody]})),
+              f"{nobody!r} would be published to the party as a discovery")
+    check(any(f == "Also involved: My physio, Dr Chen"
+              for f in T._charter_facts({"stakeholders": ["My physio, Dr Chen"]})),
+          "a real named stakeholder was filtered out of the party notebook")
+
     # Saving the same charter again must not double the notebook: two people
     # re-running an interview should not produce a wall of near-duplicates.
     before = len(facts)
