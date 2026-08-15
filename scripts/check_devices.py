@@ -71,6 +71,13 @@ DEVICES = [
     ("iPad Mini   768px", "iPad Mini", None),
     ("iPad land. 1024px", "iPad (gen 7) landscape",
      {"viewport": {"width": 1024, "height": 768}, "has_touch": True, "is_mobile": False}),
+    # The other side of the 820px breakpoint. `check_a11y` and `check_copy` render at
+    # 1500 and 1600; a 13" laptop is 1280 and nothing had drawn one. No touch here, so
+    # these also confirm the `hover:none` rules stay off where they should.
+    ("Laptop     1280px", None,
+     {"viewport": {"width": 1280, "height": 800}}),
+    ("Laptop     1440px", None,
+     {"viewport": {"width": 1440, "height": 900}}),
 ]
 
 app = FastAPI()
@@ -90,7 +97,14 @@ def _p(s: str) -> None:
     print(s.encode("ascii", "replace").decode("ascii"))
 
 
-def _ctx_args(p, name, fallback):
+def _ctx_args(p, name, fallback):  # noqa: D401 -- see below
+    """Named profile if this Playwright knows it, otherwise the explicit fallback."""
+    if name is None:
+        return dict(fallback), None
+    return _named(p, name, fallback)
+
+
+def _named(p, name, fallback):
     """Named profile if this Playwright knows it, otherwise the explicit fallback.
 
     Device lists change between Playwright versions. A check that dies on an unknown
@@ -103,7 +117,7 @@ def _ctx_args(p, name, fallback):
     return None, f"(no '{name}' profile and no fallback -- SKIPPED)"
 
 
-def _check(page, label, vw, vh) -> list[str]:
+def _check(page, label, vw, vh, touch: bool) -> list[str]:
     bad: list[str] = []
 
     overflow = page.evaluate(
@@ -132,9 +146,13 @@ def _check(page, label, vw, vh) -> list[str]:
     _p(f"    composer     : {comp['w']:.0f}px, font {comp['fs']:.0f}px")
     if comp["w"] < 140:
         bad.append(f"{label}: the composer collapses to {comp['w']:.0f}px")
-    if comp["fs"] < MIN_INPUT_FONT:
-        bad.append(f"{label}: the composer is {comp['fs']:.0f}px -- iOS force-zooms "
-                   "any focused input under 16px and does not zoom back")
+    # Only where a touch keyboard exists. A mouse-driven laptop never zooms on focus,
+    # and 13px is the deliberate desktop size -- flagging it there would be demanding
+    # the app be wrong everywhere to be right on phones. This mirrors the CSS exactly:
+    # the rule lives in `@media (hover:none)`, so the assertion is scoped to touch too.
+    if touch and comp["fs"] < MIN_INPUT_FONT:
+        bad.append(f"{label}: the composer is {comp['fs']:.0f}px on a TOUCH device -- "
+                   "iOS force-zooms any focused input under 16px and does not zoom back")
 
     # Text that does not fit its own box. Every numeric assertion above passed while
     # the composer greeted the user with a sentence cut in half -- the placeholder
@@ -234,7 +252,9 @@ def main(base: str | None = None) -> None:
             vh = page.viewport_size["height"]
             _p(f"    viewport     : {vw}x{vh}")
 
-            failures += _check(page, label, vw, vh)
+            touch = bool(args.get("has_touch") or args.get("hasTouch"))
+            _p(f"    touch        : {touch}")
+            failures += _check(page, label, vw, vh, touch)
             if errors:
                 failures.append(f"{label}: console errors {errors}")
             _p(f"    console      : {errors if errors else 'clean'}")
