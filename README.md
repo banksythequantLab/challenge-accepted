@@ -29,10 +29,9 @@ service broke.
 | | |
 |---|---|
 | Verified **locally** | 8-turn interview -> charter saved -> 12-node DAG -> 6 tools built, smoke-tested and persisted. This row said *Verified live* for weeks and was wrong: it was only ever true against a local server on a `GOOGLE_API_KEY`. On the deployed service every Toolwright was dying. See Known issues |
-
 | Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
 | Verified | 137 tests pass against a real ADK `Runner`, plus 16 live checks that drive the actual controls; FastAPI boots, `/api/healthz` 200 |
-| Verified live | **FORGE drains the whole queue on the deployed service: 6 specs asked, 6 tools built.** `scripts\check_forge_live.py` compares the Quartermaster's specs against what was persisted and fails on any gap. Three bugs deep: it was **0 tools** on every revision, then **1 of 7** with three workers silently cancelled, then **4 of 7** with the second batch idling. See Known issues |
+| Verified live | **FORGE drains the whole queue on the deployed service.** Two consecutive runs: **6 specs asked / 6 tools built**, then **7 / 7**. `scripts\check_forge_live.py` compares the Quartermaster's specs against what was persisted and fails on any gap. Three bugs deep: **0 tools** on every revision, then **1 of 7** with three workers silently cancelled, then **4 of 7** with the second batch idling. See Known issues |
 | Measured | One full challenge (12 nodes, 6 tools) = **243k prompt / 66k billed output, ~$0.86**. Break-even at $29/seat ≈ **34 challenges/user/month** |
 | Fixed | The "exactly 4 tools" ceiling. Two causes, both live-only. See Known issues. |
 | Verified live | CLIMB end to end: node closed on evidence, feedback captured with reason, blocker -> group fact -> interview re-opened -> graph redrawn around the constraint |
@@ -479,8 +478,9 @@ what it just ran. Five tests, including one that runs three iterations and one t
 proves four concurrent workers cannot clear each other.
 
 Measured on the deployed service across the three fixes: **0 tools** -> **1 of 7, three
-workers silently cancelled** -> **4 of 7, second batch idle** -> **6 specs asked, 6
-tools built**.
+workers silently cancelled** -> **4 of 7, second batch idle** -> **6 of 6**, then **7 of
+7** on the next run. Two consecutive complete drains, because one PASS on a
+model-driven pipeline is an anecdote.
 
 Two things this cost that are worth naming. `scripts\check_forge_live.py` exists because
 counting tools alone cannot distinguish "built everything it meant to" from "gave up

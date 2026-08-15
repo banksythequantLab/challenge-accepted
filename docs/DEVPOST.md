@@ -139,6 +139,35 @@ don't call a model — which is the actual lesson.
   anywhere in the codebase, so "tell it what didn't work and the next one is different" was
   false. It had gone unnoticed because the reason box was a native `window.prompt()`, which
   blocks the page and every browser check driving it. An untestable control rots.
+- **The money shot had never once run on the deployed service.** Not degraded — zero
+  tools, on every revision, while local runs built four to six every time and our own
+  README recorded that as verified. Three bugs, stacked, each hiding the next, and every
+  one of them invisible from outside: deploy green, health green, graph drawn, journal
+  filling, FORGE rail animating around `tools: []`.
+
+  **(1)** `include_server_side_tool_invocations` is *required* on the Gemini Developer
+  API and **raises** on Vertex. Local runs use an API key; the deploy uses Vertex. The
+  fix for one environment was the outage in the other. That took us from 0 tools to
+  exactly 1 — always exactly 1, which is the shape of a bug, not a shortfall.
+
+  **(2)** A worker's first model call returns an `executableCode` part carrying an `id`.
+  ADK keeps it in history; the second call sends it back; `google-genai` refuses to
+  convert it. And workers run in an `asyncio.TaskGroup`, where **one failure cancels its
+  siblings** — so the first worker to reach a second call killed the other three
+  mid-build. Hence exactly one tool, from whoever finished first.
+
+  **(3)** With all four surviving, it still built 4 of 7. `include_contents="none"`
+  filters *session history*; it does not clear what the flow accumulates inside one
+  invocation, and the LoopAgent re-runs the same worker instances. On iteration two the
+  worker saw the tool it had already built and wrote prose about it in 1.6 seconds
+  instead of building the new one — the exact failure that flag was added to prevent.
+
+  Now **6 specs asked, 6 tools built**, on the deployed service. What made any of it
+  findable was refusing to read silence as success: a worker that does nothing and a
+  worker with nothing to do produce identical output, so the phase now narrates itself —
+  dispatcher assignments, per-worker START/END with slot contents, and every model call
+  with its instruction size and content count. One env var, off by default.
+
 - **Three unrelated subsystems riding on one boolean.** `use_vertex()` gated sessions,
   memory *and* Cloud Trace. Switching on Memory Bank would therefore also have moved
   every conversation off our Firestore session service onto Agent Engine — nothing would
@@ -176,7 +205,7 @@ don't call a model — which is the actual lesson.
   and written by `save_charter` and `complete_node`. `scripts\check_memory.py` proves it
   end to end; `scripts\check_memory_bank.py` sits underneath and round-trips the service
   directly, so a failure tells you whether the infrastructure or the prompt broke.
-- **116 tests plus fifteen live checks**, including a regression test for every bug
+- **137 tests plus sixteen live checks**, including a regression test for every bug
   above. The checks click the actual controls and read the clipboard, the iframe and the
   resulting prompt string back — `check_feedback.py` follows a thumbs-down all the way
   into the Quartermaster's instruction, because "the loop is closed" and "the loop is
