@@ -43,6 +43,12 @@ TURNS = [
 #: A 300s budget was one slow model call away from calling a healthy run a failure.
 TURN_TIMEOUT_MS = 600000
 
+#: Ids of map nodes that advertise at least one built tool, read off the accessible
+#: name the app already writes ("Draft the plan. todo, 2 tools, ready to start").
+ARMED_NODE_IDS = """() => [...document.querySelectorAll('#graph .node')]
+  .filter(n => /,\\s*\\d+\\s+tools?\\b/.test(n.getAttribute('aria-label') || ''))
+  .map(n => n.dataset.id)"""
+
 
 def _p(s: str) -> None:
     print(s.encode("ascii", "replace").decode("ascii"), flush=True)
@@ -129,24 +135,45 @@ def main(base: str) -> int:
                 problems.append(f"could not open the {label} tab: {exc}")
 
         # The money shot: does a built tool actually open?
+        #
+        # This asked `is_visible("[data-open]")` straight after clicking the Quest tab
+        # and reported "FORGE produced nothing the user can actually use" on a run whose
+        # header said 5 TOOLS FORGED. The Open-tool button lives in the detail pane,
+        # which only renders once a NODE is selected -- so the check was asserting that
+        # a panel it had never opened was empty. A tool that cannot be reached without
+        # clicking a node is still reachable; the click is the product.
         try:
             page.click('.tab[data-p="quest"]')
             page.wait_for_timeout(700)
-            if page.is_visible("[data-open]"):
-                page.locator("[data-open]").first.click()
-                page.wait_for_selector("#modal.on", timeout=15000)
-                page.wait_for_timeout(2500)
-                shot("tool")
-                page.click("#m-close")
+            # A node carrying a tool says so in its aria-label ("..., 2 tools, ...").
+            # That is the accessible truth and the only stable hook -- the badge itself
+            # is an unclassed <g>. Matched on the count, not the bare word, so a node
+            # called "Build tooling" is not mistaken for one that has a tool.
+            armed_ids = page.evaluate(ARMED_NODE_IDS)
+            target = (page.locator(f'#graph .node[data-id="{armed_ids[0]}"]')
+                      if armed_ids else page.locator("#graph .node").first)
+            if not page.locator("#graph .node").count():
+                problems.append("the quest map has no nodes at all")
             else:
-                problems.append("no 'Open tool' button anywhere -- FORGE produced "
-                                "nothing the user can actually use")
+                target.click()
+                page.wait_for_timeout(900)
+                if page.locator("[data-open]").count():
+                    page.locator("[data-open]").first.click()
+                    page.wait_for_selector("#modal.on", timeout=15000)
+                    page.wait_for_timeout(2500)
+                    shot("tool")
+                    page.click("#m-close")
+                else:
+                    problems.append("selected a node and it offered no tool to open -- "
+                                    "FORGE produced nothing the user can reach")
         except Exception as exc:
             problems.append(f"opening a tool failed: {exc}")
 
         title = page.eval_on_selector("#title", "e => e.textContent.trim()")
         nodes = page.eval_on_selector_all(".node", "e => e.length")
-        tools = page.eval_on_selector_all("[data-open]", "e => e.length")
+        # Count nodes that ADVERTISE a tool, not [data-open] buttons: the detail pane
+        # renders one node at a time, so counting buttons counts the selection.
+        tools = len(page.evaluate(ARMED_NODE_IDS))
         browser.close()
 
     _p(f"\ntitle : {title}")
