@@ -30,7 +30,8 @@ service broke.
 |---|---|
 | Verified **locally** | 8-turn interview -> charter saved -> 12-node DAG -> 6 tools built, smoke-tested and persisted. This row said *Verified live* for weeks and was wrong: it was only ever true against a local server on a `GOOGLE_API_KEY`. On the deployed service every Toolwright was dying. See Known issues |
 | Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
-| Verified | 137 tests pass against a real ADK `Runner`, plus 16 live checks that drive the actual controls; FastAPI boots, `/api/healthz` 200 |
+| Verified | 137 tests pass against a real ADK `Runner`, plus 17 live checks that drive the actual controls; FastAPI boots, `/api/healthz` 200. All 17 re-run against the current build after today's six deploys -- not carried over from a green run last week |
+| Verified | **The layout holds on five viewports, two of which had never been rendered.** `scripts\check_devices.py`: Galaxy S9+ 320px, iPhone 13 390px, Pixel 7 412px (the first Android ever tested), iPad Mini 768px, iPad landscape 1024px. It found two real bugs on its first run -- see Known issues |
 | Verified live | **FORGE drains the whole queue on the deployed service.** Two consecutive runs: **6 specs asked / 6 tools built**, then **7 / 7**. `scripts\check_forge_live.py` compares the Quartermaster's specs against what was persisted and fails on any gap. Three bugs deep: **0 tools** on every revision, then **1 of 7** with three workers silently cancelled, then **4 of 7** with the second batch idling. See Known issues |
 | Measured | One full challenge (12 nodes, 6 tools) = **243k prompt / 66k billed output, ~$0.86**. Break-even at $29/seat ≈ **34 challenges/user/month** |
 | Fixed | The "exactly 4 tools" ceiling. Two causes, both live-only. See Known issues. |
@@ -395,6 +396,41 @@ exists. Cloud Trace now has `CA_TRACE_TO_CLOUD`, off by default, and the exporte
 
 Three subsystems on one boolean, found one at a time, each by a different method:
 reading the diff, reading the vendor's source, and reading a crash log.
+
+### Fixed: two layout bugs on devices nothing had ever rendered
+
+`check_phone.py` drives the product deeply on one handset -- iPhone 13, 390px. That is
+one Android-free data point, and the dashboard has exactly two breakpoints:
+`max-width:820px` and `hover:none`. Everything between 820px and a desktop window had
+never been rendered by anything. `check_devices.py` trades depth for breadth across five
+viewports, and found two real bugs on its first run.
+
+**An iPad in landscape zoomed and never came back.** The 16px input rule lived inside
+`@media (max-width:820px)`, where the width was standing in for "phone". Wrong axis: an
+iPad in landscape is 1024px *and* a touch device, so it fell through to the 13px desktop
+composer. iOS Safari force-zooms any focused input under 16px and does not zoom back --
+tap the chat box on the most likely tablet at a demo and you are stranded at 1.3x with
+the layout hanging off the right edge. The rule now lives in `hover:none`, which is what
+"raises a touch keyboard" actually means.
+
+**The last tab sat 4px off a 320px screen.** Measured, rather than guessed at after two
+failed fixes:
+
+```
+innerWidth 320 · #app 320 · header 324 · main 324 · aside 324 · tabs 324
+main scrollWidth 1994 · quest map SVG 1980
+```
+
+A grid item's default `min-width` is `auto` -- never shrink below your content. The quest
+map is a 1980px SVG, so the column refused to go under 324px and every child inherited
+it. `#app` clips the overflow, so the page never scrolled sideways and nothing looked
+broken; the fourth tab was simply unreachable. `#app > *{min-width:0}` is the fix.
+
+Two wrong turns on the way, both worth keeping: `min-width:0` on `.tab` alone treated the
+symptom, and the 820px block flipped `.tab` to `display:flex`, which turns the label into
+an anonymous flex item that `text-overflow:ellipsis` cannot touch and `min-width:0`
+cannot reach. Three runs produced byte-identical failures before I stopped guessing and
+measured the box widths.
 
 ### Fixed: two Vertex-illegal parameters, and the second hid behind the first
 
