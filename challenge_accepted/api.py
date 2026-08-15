@@ -140,6 +140,12 @@ def healthz() -> dict[str, Any]:
         "vertex": config.use_memory_bank(),
         "memory": "agentengine" if config.use_memory_bank() else "none",
         "sessions": "agentengine" if config.use_vertex_sessions() else "firestore",
+        # Whether the door is locked, stated where anyone can read it without a token.
+        # This lives on /api/healthz as well as /healthz because /api/healthz is the
+        # one that actually resolves in production -- ADK's static mount shadows bare
+        # paths, which is the trap already documented above.
+        "auth": auth.AUTH_MODE,
+        "auth_configured": auth.browser_config()["enabled"],
         "models": {
             "reasoning": config.MODEL_REASONING,
             "cheap": config.MODEL_CHEAP,
