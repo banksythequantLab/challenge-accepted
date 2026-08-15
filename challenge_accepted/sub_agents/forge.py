@@ -166,6 +166,23 @@ def _strip_code_ids(callback_context, llm_request):
     `ExceptionGroup`, and a phase that builds one of seven tools renders exactly like a
     phase that only needed one.
     """
+    # Traced per model call, because "the worker idled" has three very different
+    # causes and they are indistinguishable from outside: no model call at all (ADK
+    # never ran the flow), a call whose instruction lost its spec (state injection),
+    # or a call that saw the spec and chose to do nothing (the prompt). Iteration two
+    # of the loop builds nothing and this says which.
+    if FORGE_DEBUG:
+        instruction = ""
+        for part in (getattr(llm_request, "config", None) and
+                     getattr(llm_request.config, "system_instruction", None)) or []:
+            instruction += getattr(part, "text", "") or ""
+        if isinstance(getattr(getattr(llm_request, "config", None),
+                              "system_instruction", None), str):
+            instruction = llm_request.config.system_instruction
+        _trace(f"model call: agent={getattr(callback_context, 'agent_name', '?')} "
+               f"spec_in_prompt={'node_id' in instruction} "
+               f"instr_chars={len(instruction)} contents={len(llm_request.contents or [])}")
+
     if not config.use_vertex_models():
         return None
     stripped = 0
