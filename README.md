@@ -31,7 +31,7 @@ service broke.
 | Verified **locally** | 8-turn interview -> charter saved -> 12-node DAG -> 6 tools built, smoke-tested and persisted. This row said *Verified live* for weeks and was wrong: it was only ever true against a local server on a `GOOGLE_API_KEY`. On the deployed service every Toolwright was dying. See Known issues |
 | Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
 | Verified | 137 tests pass against a real ADK `Runner`, plus 17 live checks that drive the actual controls; FastAPI boots, `/api/healthz` 200. All 17 re-run against the current build after today's six deploys -- not carried over from a green run last week |
-| Verified | **The layout holds on five viewports, two of which had never been rendered.** `scripts\check_devices.py`: Galaxy S9+ 320px, iPhone 13 390px, Pixel 7 412px (the first Android ever tested), iPad Mini 768px, iPad landscape 1024px. It found two real bugs on its first run -- see Known issues |
+| Verified live | **The layout holds on five viewports, on the deployed site.** `scripts\check_devices.py https://challengeaccepted.app`: Galaxy S9+ 320px, iPhone 13 390px, Pixel 7 412px (the first Android ever tested), iPad Mini 768px, iPad landscape 1024px -- rendering a real challenge pulled from the live API. Three bugs found, the third by looking at the screenshots after every numeric assertion had passed. See Known issues |
 | Verified live | **FORGE drains the whole queue on the deployed service.** Two consecutive runs: **6 specs asked / 6 tools built**, then **7 / 7**. `scripts\check_forge_live.py` compares the Quartermaster's specs against what was persisted and fails on any gap. Three bugs deep: **0 tools** on every revision, then **1 of 7** with three workers silently cancelled, then **4 of 7** with the second batch idling. See Known issues |
 | Measured | One full challenge (12 nodes, 6 tools) = **243k prompt / 66k billed output, ~$0.86**. Break-even at $29/seat ≈ **34 challenges/user/month** |
 | Fixed | The "exactly 4 tools" ceiling. Two causes, both live-only. See Known issues. |
@@ -431,6 +431,26 @@ symptom, and the 820px block flipped `.tab` to `display:flex`, which turns the l
 an anonymous flex item that `text-overflow:ellipsis` cannot touch and `min-width:0`
 cannot reach. Three runs produced byte-identical failures before I stopped guessing and
 measured the box widths.
+
+**The third bug the assertions could not see.** With all five viewports green, the
+screenshots showed the composer greeting the user with a sentence cut in half:
+
+```
+| What do you want to      |
+| make happe               |   <- clipped by its own box
+```
+
+The placeholder was two lines by design -- `"What do you want to make happen?&#10;Shift+
+Enter for a new line"` -- inside a `rows="1"` textarea. **That hint had never been
+visible on any device at any width since it was written**, and it was keyboard advice
+being offered to phones. It is a `title` now. The remaining wrap is the cost of the 16px
+rule above and is paid in height: `min-height:72px` on touch, two full lines, which is
+what every messaging app on a phone gives you anyway.
+
+Every numeric assertion passed while that was on screen -- width 182px, font 16px, tap
+targets fine. A width in pixels says nothing about whether the words fit. There is an
+assertion for it now (`scrollHeight > clientHeight` on the composer, message bodies and
+the title), and it fails on four of the five viewports against the old CSS.
 
 ### Fixed: two Vertex-illegal parameters, and the second hid behind the first
 
