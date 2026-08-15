@@ -67,6 +67,39 @@ def _group_id(tool_context: ToolContext) -> str:
     return f"grp_{tool_context.state.get('user_id', 'anon')}"
 
 
+#: Things people write when they mean "nothing here". Recording "None (running solo)"
+#: as a shared discovery makes the party notebook look like a form dump.
+_EMPTY_ANSWERS = {"", "none", "n/a", "na", "nothing", "no", "unknown", "not applicable",
+                  "none stated", "none given", "none specified", "-"}
+
+
+def _is_empty_answer(text: str) -> bool:
+    stripped = text.strip().strip(".").lower()
+    return not stripped or stripped in _EMPTY_ANSWERS or stripped.startswith("none (")
+
+
+def _charter_facts(charter: dict[str, Any]) -> list[str]:
+    """The parts of a charter a teammate would otherwise have to ask about.
+
+    Deliberately NOT the title or the outcome: those are already the headline on every
+    screen, and repeating them in the party notebook is padding, not intelligence.
+    """
+    facts: list[str] = []
+    deadline = str(charter.get("deadline") or "").strip()
+    if deadline and not _is_empty_answer(deadline):
+        facts.append(f"Deadline: {deadline}.")
+    for c in charter.get("constraints") or []:
+        if isinstance(c, str) and not _is_empty_answer(c):
+            facts.append(c.strip())
+    for a in charter.get("prior_attempts") or []:
+        if isinstance(a, str) and not _is_empty_answer(a):
+            facts.append(f"Already tried: {a.strip()}")
+    for s in charter.get("stakeholders") or []:
+        if isinstance(s, str) and not _is_empty_answer(s):
+            facts.append(f"Also involved: {s.strip()}")
+    return facts
+
+
 async def save_charter(
     title: str,
     outcome: str,
@@ -121,6 +154,28 @@ async def save_charter(
 
     store.add_journal(cid, {"actor": "Interviewer", "kind": "decision",
                             "text": f"Charter locked: {outcome}"})
+
+    # Seed the party's shared notebook from the interview.
+    #
+    # `remember_group_fact` only fires on a RETURNING turn -- someone coming back and
+    # saying something new. So on a fresh challenge the Party pane read "Nothing
+    # learned yet" at the exact moment a teammate opened the invite link, even though
+    # the interview had just established the deadline, the constraints and everything
+    # already tried. The densest facts in the whole run were sitting in the charter
+    # where the Party pane does not look.
+    #
+    # Done in code rather than by asking an agent to do it: these facts are already
+    # known and structured, and a prompt that says "now also record these" is a prompt
+    # that can claim it did and not have.
+    shared = 0
+    for fact in _charter_facts(charter):
+        if store.add_group_fact(group_id, fact):
+            shared += 1
+    if shared:
+        store.add_journal(cid, {
+            "actor": "Interviewer", "kind": "insight",
+            "text": f"Shared {shared} fact{'s' if shared != 1 else ''} from the "
+                    f"interview with the party."})
 
     # The interview is the densest source of durable facts about this person -- what
     # they tried before, what they are short of, who else is involved. Hand it to
