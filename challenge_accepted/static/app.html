@@ -539,6 +539,37 @@ async function startRun(text) {
 const isIdleChatter = (author, text) =>
   /^toolwright_\d+$/.test(author || '') && /^\W*idle\W*$/i.test(text.trim());
 
+//: An agent carrying an `output_schema` does not reply to a person -- its whole turn
+//: IS the machine payload. The Quartermaster's is a ToolSpec list for the Dispatcher,
+//: and it was going straight into the conversation as a wall of JSON:
+//:
+//:   QUARTERMASTER {   "specs": [     {       "node_id": "audit-34-sites", ...
+//:
+//: A user asks for a plan and is shown the wire format. It arrives mid-stream in
+//: fragments, so nothing can be parsed until the turn ends -- which is why this
+//: buffers by author and renders a summary afterwards rather than trying to detect
+//: JSON per chunk and leaving half an object on screen.
+//: Tolerate a fenced payload: some turns come back wrapped in ```json.
+const looksStructured = (text) => /^(```(?:json)?\s*)?[\[{]/i.test(text.trim());
+
+//: Turn the payload into the most interesting sentence in the run: what it decided to
+//: build, before it builds it. Returns null if this is not a spec list after all, in
+//: which case the raw text is shown -- better an ugly bubble than a silent one.
+function specSummary(raw) {
+  let data;
+  const body = raw.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '');
+  try { data = JSON.parse(body); } catch { return null; }
+  const specs = Array.isArray(data) ? data : data.specs;
+  if (!Array.isArray(specs) || !specs.length) return null;
+  const wanted = specs.filter(s => s && s.needed && s.name);
+  if (!wanted.length) return null;
+  const skipped = specs.length - wanted.length;
+  const names = wanted.map(s => `${s.name}${s.tool_type ? ` (${s.tool_type})` : ''}`);
+  return `Planned ${wanted.length} tool${wanted.length === 1 ? '' : 's'}` +
+         (skipped ? `, and judged ${skipped} step${skipped === 1 ? '' : 's'} fine ` +
+                    `without one` : '') + ':\n· ' + names.join('\n· ');
+}
+
 //: An action chip, tagged with the agent that took it.
 function act(author, text) {
   const d = bubble('act', null, text);
@@ -635,6 +666,21 @@ async function send(retryText) {
     const dec = new TextDecoder();
     let buf = '', lastAuthor = null, node = null;
 
+    //: A turn that opens with `{` or `[` is a machine payload, not speech. Hold it
+    //: whole -- we cannot summarise half an object -- and render the summary when the
+    //: turn ends, which is either the next author speaking or the stream closing.
+    let held = null;
+    const flushHeld = () => {
+      if (held === null) return;
+      const text = held; held = null;
+      const summary = specSummary(text);
+      //: No summary means it was not a spec list after all. Show the raw text rather
+      //: than swallowing a turn: an ugly bubble beats a silent one.
+      if (summary) bubble('bot', lastAuthor, summary);
+      else if (text.trim()) bubble('bot', lastAuthor, text.trim());
+      $('chatlog').scrollTop = $('chatlog').scrollHeight;
+    };
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -653,8 +699,11 @@ async function send(retryText) {
           // actual work under a stack of bubbles that say nothing. The rail already
           // shows the slot as idle, which is where that information belongs.
           if (p.text?.trim() && !isIdleChatter(ev.author, p.text)) {
-            if (ev.author !== lastAuthor) { node = null; lastAuthor = ev.author; }
-            if (!node) node = bubble('bot', ev.author, p.text.trim());
+            //: flush BEFORE lastAuthor moves -- the held turn belongs to the old one.
+            if (ev.author !== lastAuthor) { flushHeld(); node = null; lastAuthor = ev.author; }
+            if (held !== null) held += p.text;
+            else if (!node && looksStructured(p.text)) held = p.text;
+            else if (!node) node = bubble('bot', ev.author, p.text.trim());
             else appendText(node, p.text);
             $('chatlog').scrollTop = $('chatlog').scrollHeight;
           }
@@ -669,6 +718,8 @@ async function send(retryText) {
         }
       }
     }
+    //: The last author's turn has no successor to trigger the flush.
+    flushHeld();
     // relist: the turn may have created a quest that is not in the picker yet. This is
     // the moment we learn that, which is why the poll does not have to keep asking.
     await adoptChallengeFromSession();
