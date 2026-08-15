@@ -139,6 +139,16 @@ def _worker_config() -> types.GenerateContentConfig:
     )
 
 
+#: (invocation_id, worker) -> model calls made since this worker's current slot began.
+#: Reset by the worker's before_agent_callback, so 0 means "first call of this build".
+_CALLS_THIS_BUILD: dict[str, int] = {}
+
+
+def _build_key(callback_context) -> str:
+    return (f"{getattr(callback_context, 'invocation_id', '?')}:"
+            f"{getattr(callback_context, 'agent_name', '?')}")
+
+
 def _strip_code_ids(callback_context, llm_request):
     """Remove the `id` Vertex refuses to accept back on code parts.
 
@@ -183,6 +193,28 @@ def _strip_code_ids(callback_context, llm_request):
                f"spec_in_prompt={'node_id' in instruction} "
                f"instr_chars={len(instruction)} contents={len(llm_request.contents or [])}")
 
+    # `include_contents="none"` does NOT hold across loop iterations. It filters session
+    # history; it does not clear what the flow accumulates inside a single invocation.
+    # The loop re-runs the same worker instances, so on iteration two a worker's first
+    # model call arrived carrying iteration one's build -- `contents=4` where the first
+    # call of iteration one had `contents=1`.
+    #
+    # The consequence is the exact failure `include_contents="none"` was added to stop,
+    # documented in `_worker` and observed again live: the worker sees the tool it
+    # already made, replies with prose about it in ~1.5s, and never calls `save_tool`.
+    # Six specs in, four tools out, every remaining batch silently idle.
+    #
+    # So clear it here, on the first model call of each build only. Later calls in the
+    # same build keep their history, because that is the code-execute-then-fix loop and
+    # it needs to see what it just ran.
+    key = _build_key(callback_context)
+    if _CALLS_THIS_BUILD.get(key) == 0 and llm_request.contents:
+        _trace(f"cleared {len(llm_request.contents)} stale content(s) from a previous "
+               f"iteration for {getattr(callback_context, 'agent_name', '?')}")
+        llm_request.contents = []
+    if key in _CALLS_THIS_BUILD:
+        _CALLS_THIS_BUILD[key] += 1
+
     if not config.use_vertex_models():
         return None
     stripped = 0
@@ -206,6 +238,10 @@ def _saw_its_slot(index: int):
     """
 
     def _cb(callback_context):
+        # Not debug-only: this is what tells `_strip_code_ids` that a fresh build has
+        # begun, and therefore that any accumulated contents belong to a previous
+        # iteration and must go.
+        _CALLS_THIS_BUILD[_build_key(callback_context)] = 0
         if not FORGE_DEBUG:
             return None
         slot = callback_context.state.get(f"{SLOT_PREFIX}{index}")
@@ -219,6 +255,8 @@ def _saw_its_slot(index: int):
 
 def _finished(index: int):
     def _cb(callback_context):
+        # Bounded: one small int per worker per invocation, dropped when it ends.
+        _CALLS_THIS_BUILD.pop(_build_key(callback_context), None)
         if not FORGE_DEBUG:
             return None
         _trace(f"worker {index}: END")
