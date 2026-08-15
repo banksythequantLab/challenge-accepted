@@ -29,11 +29,10 @@ service broke.
 | | |
 |---|---|
 | Verified **locally** | 8-turn interview -> charter saved -> 12-node DAG -> 6 tools built, smoke-tested and persisted. This row said *Verified live* for weeks and was wrong: it was only ever true against a local server on a `GOOGLE_API_KEY`. On the deployed service every Toolwright was dying. See Known issues |
-| Verified live | **FORGE builds tools on the deployed service** -- as of `00018-7zs`, and not before it. Every earlier revision produced `tools: []` |
+
 | Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
-| Verified | 128 tests pass against a real ADK `Runner`, plus 15 live checks that drive the actual controls; FastAPI boots, `/api/healthz` 200 |
-| Verified live | **FORGE builds a full batch of tools on the deployed service.** `scripts\check_forge_live.py`: all four Toolwrights execute code and save, concurrently. Before the fix it was **1 tool of 7 with three workers silently cancelled**; measured runs since are 4 and 5 |
-| Open, measured | The **tail** of the queue. A batch is 4 workers wide; when the Quartermaster asks for 7, the loop's later iterations do not always finish inside the turn -- last run built 4 of 7. That is a queue-drain question, not the outage it used to be, and the check fails on it rather than rounding it up |
+| Verified | 137 tests pass against a real ADK `Runner`, plus 16 live checks that drive the actual controls; FastAPI boots, `/api/healthz` 200 |
+| Verified live | **FORGE drains the whole queue on the deployed service: 6 specs asked, 6 tools built.** `scripts\check_forge_live.py` compares the Quartermaster's specs against what was persisted and fails on any gap. Three bugs deep: it was **0 tools** on every revision, then **1 of 7** with three workers silently cancelled, then **4 of 7** with the second batch idling. See Known issues |
 | Measured | One full challenge (12 nodes, 6 tools) = **243k prompt / 66k billed output, ~$0.86**. Break-even at $29/seat ≈ **34 challenges/user/month** |
 | Fixed | The "exactly 4 tools" ceiling. Two causes, both live-only. See Known issues. |
 | Verified live | CLIMB end to end: node closed on evidence, feedback captured with reason, blocker -> group fact -> interview re-opened -> graph redrawn around the constraint |
@@ -456,9 +455,32 @@ only. Four tests pin it, and one of them runs the stripped history through
 `google.genai`'s real `_Part_to_vertex` rather than a fake -- that is the assertion that
 would have caught this before it shipped.
 
-Measured on the deployed service, before and after: **1 tool of 7, three workers
-silently cancelled** -> **4 and 5 tools, all four workers executing code and saving
-concurrently**.
+**The third bug, which the second one had been hiding.** With all four workers surviving,
+the deployed service still built 4 of 7. The per-model-call trace answered it in one
+line -- `contents=1` on iteration one's first call, `contents=4` on iteration two's:
+
+```
+[FORGE] model call: agent=toolwright_0 spec_in_prompt=True instr_chars=1810 contents=1
+        ... iteration one: four tools built
+[FORGE] model call: agent=toolwright_0 spec_in_prompt=True instr_chars=1856 contents=4
+        ... worker 0: END, 1.6 seconds later, no save_tool
+```
+
+The spec was in the prompt. The model *was* called. It simply arrived carrying the
+previous iteration's build. `include_contents="none"` filters *session history*; it does
+not clear what the flow accumulates within one invocation, and the LoopAgent re-runs the
+same worker instances. So on iteration two the worker saw the tool it had already made
+and wrote confident prose about it in 1.6 seconds instead of building the new one --
+which is, word for word, the failure `include_contents="none"` was added to prevent.
+
+`_strip_code_ids` now clears contents on the first model call of each build and leaves
+every later call alone, because that is the execute-then-fix loop and it needs to see
+what it just ran. Five tests, including one that runs three iterations and one that
+proves four concurrent workers cannot clear each other.
+
+Measured on the deployed service across the three fixes: **0 tools** -> **1 of 7, three
+workers silently cancelled** -> **4 of 7, second batch idle** -> **6 specs asked, 6
+tools built**.
 
 Two things this cost that are worth naming. `scripts\check_forge_live.py` exists because
 counting tools alone cannot distinguish "built everything it meant to" from "gave up
