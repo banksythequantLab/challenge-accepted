@@ -12,6 +12,7 @@ import json
 
 import pytest
 from fastapi import FastAPI, Request
+from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 from challenge_accepted import authgate
@@ -49,6 +50,22 @@ def client(monkeypatch):
         # hangs or returns an empty body, and the failure looks like a network fault.
         body = await request.json()
         return {"echo": body}
+
+    @app.post("/run")
+    async def run_streaming(request: Request):
+        """Shaped like the real /run_sse: reads the body, then STREAMS.
+
+        The streaming half is the whole point. A JSON route never triggers
+        Starlette's `listen_for_disconnect`, so a gate that breaks receive() passes
+        a JSON test and takes the product down.
+        """
+        body = await request.json()
+
+        async def events():
+            for i in range(3):
+                yield f"data: {json.dumps({'i': i, 'echo': body})}\n\n".encode()
+
+        return StreamingResponse(events(), media_type="text/event-stream")
 
     @app.get("/app")
     def shell():
@@ -116,6 +133,24 @@ def test_running_as_yourself_still_receives_the_whole_body(client):
     r = client.post("/run_sse", headers={"Authorization": "Bearer good"}, json=payload)
     assert r.status_code == 200
     assert r.json()["echo"] == payload, "the gate consumed the body and never gave it back"
+
+
+def test_a_streaming_run_delivers_all_its_events(client):
+    """The regression that took the live site down.
+
+    The gate replayed the request body on EVERY receive() call. StreamingResponse
+    loops on receive() waiting for http.disconnect, got http.request a second time,
+    and raised `RuntimeError: Unexpected message received: http.request` -- after the
+    200 had already gone out. Every agent run on production ended in 46ms with zero
+    events and no error anywhere the user could see.
+    """
+    payload = {"userId": "uid_alice", "newMessage": {"parts": [{"text": "hi"}]}}
+    with client.stream("POST", "/run", headers={"Authorization": "Bearer good"},
+                       json=payload) as r:
+        assert r.status_code == 200
+        chunks = [c for c in r.iter_lines() if c.strip()]
+    assert len(chunks) == 3, f"stream died early: {chunks}"
+    assert json.loads(chunks[-1].removeprefix("data: "))["echo"] == payload
 
 
 def test_a_body_that_names_nobody_is_allowed_through(client):

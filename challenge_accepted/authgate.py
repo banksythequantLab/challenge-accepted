@@ -13,10 +13,11 @@ create a challenge owned by you, or read a session belonging to you, with a toke
 verifies perfectly. The gate therefore refuses any request whose stated user is not the
 verified one.
 
-A note on reading the body here: BaseHTTPMiddleware hands the downstream app a fresh
-Request built from the same receive channel, so consuming the body would leave the
-route with nothing to read. The body is replayed explicitly below. This costs one
-buffer per /run_sse call and is the reason /run_sse is the only body we look at.
+A note on reading the body here: BaseHTTPMiddleware wraps the request in a
+`_CachedRequest`, which replays an already-consumed body to the downstream app on its
+own. Reading it is safe; "helping" it along is not, and cost this product an outage --
+see the comment at the read below. This costs one buffer per /run_sse call, which is
+why /run_sse is the only body we look at.
 """
 
 from __future__ import annotations
@@ -86,12 +87,22 @@ def install(app) -> None:
                 f"{caller.display}.", status=403)
 
         if path in _BODY_ROUTES and request.method == "POST":
+            # Just read it. BaseHTTPMiddleware hands us a `_CachedRequest`, whose
+            # `wrapped_receive` already replays a consumed body to the downstream app
+            # exactly once and then waits for `http.disconnect`.
+            #
+            # I did not check that, and hand-rolled a replay that returned the body on
+            # EVERY receive() call. It took the live site down. /run_sse answers with a
+            # StreamingResponse, whose `listen_for_disconnect` loops on receive()
+            # waiting for a disconnect; it got `http.request` a second time and raised
+            #     RuntimeError: Unexpected message received: http.request
+            # after the 200 had already gone out. Every agent run ended in 46ms with
+            # zero events and no error the user could see: you typed a message and
+            # nothing happened.
+            #
+            # The unit test passed because it used a JSON route, and a JSON route
+            # never listens for a disconnect. tests/test_authgate.py now streams.
             body = await request.body()
-
-            async def replay():
-                return {"type": "http.request", "body": body, "more_body": False}
-
-            request._receive = replay  # noqa: SLF001 -- see the module docstring
             try:
                 stated = (json.loads(body or b"{}") or {}).get("userId")
             except ValueError:
