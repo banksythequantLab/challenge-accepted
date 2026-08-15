@@ -236,7 +236,22 @@
   .ready{animation:pulse 2.6s ease-in-out infinite}
   @keyframes pulse{0%,100%{opacity:.3}50%{opacity:.9}}
   /* The tool viewer. A tool you cannot open is a screenshot of a tool. */
-  #modal{position:fixed;inset:0;z-index:50;display:none;background:rgba(6,8,12,.78);
+  /* The sign-in gate. z-index above the tool sheet: if both were ever open at once the
+   one that decides whether you may see anything has to win. */
+#gate{position:fixed;inset:0;z-index:60;display:flex;align-items:center;
+  justify-content:center;background:rgba(6,8,12,.92);padding:20px}
+#gate[hidden]{display:none}
+.gatecard{max-width:380px;width:100%;text-align:center;background:var(--panel,#12151D);
+  border:1px solid #2A3040;border-radius:16px;padding:28px 24px}
+.gatecard h2{margin:0 0 10px;font-size:15px;letter-spacing:2px;
+  background:linear-gradient(90deg,#4C8DFF,#B478FF);-webkit-background-clip:text;
+  background-clip:text;color:transparent}
+.gatecard p{margin:0 0 18px;font-size:12.5px;line-height:1.6;color:#8B93A7}
+.gatecard button{width:100%;min-height:44px;font-size:13px}
+.gate-err{color:#EA4335;margin:14px 0 0;font-size:12px}
+/* Roster avatars. 18px so a party of five still fits on one line on a phone. */
+.face{width:18px;height:18px;border-radius:50%;vertical-align:-4px;margin-right:4px}
+#modal{position:fixed;inset:0;z-index:50;display:none;background:rgba(6,8,12,.78);
     backdrop-filter:blur(3px);padding:32px}
   #modal.on{display:flex;align-items:center;justify-content:center}
   .sheet{background:var(--panel);border:1px solid var(--line);border-radius:16px;
@@ -315,6 +330,12 @@
       <div class="stat"><b id="c-tools">0</b><span>tools forged</span></div>
       <div class="stat"><b id="c-party">1</b><span>in party</span></div>
       <div class="stat"><b id="live">●</b><span>live</span></div>
+      <!-- Who the SERVER thinks you are, in the header, on every screen. The whole
+           point of adding auth is that this stops being a guess. -->
+      <div class="stat" id="who" hidden>
+        <b id="whoami" hidden></b>
+        <button class="ghost" id="signout" hidden title="Sign out">sign out</button>
+      </div>
     </div>
   </header>
 
@@ -370,6 +391,17 @@
   </aside>
 </div>
 
+<!-- The sign-in gate. Rendered over everything and removed once Firebase reports a
+     user, so nothing behind it can fire a request that would 401. -->
+<div id="gate" hidden>
+  <div class="gatecard" role="dialog" aria-modal="true" aria-labelledby="gate-h">
+    <h2 id="gate-h">CHALLENGE ACCEPTED</h2>
+    <p>Quests are shared with the people you invite, so we need to know who you are.</p>
+    <button id="gate-in" class="send">Sign in with Google</button>
+    <p id="gate-err" class="gate-err" hidden></p>
+  </div>
+</div>
+
 <div id="modal">
   <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="m-name">
     <header>
@@ -395,11 +427,35 @@ const APP_NAME = "challenge_accepted";
 const esc = s => String(s ?? '').replace(/[&<>"]/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
+// Identity. Before Google Sign-In this was a random string this file invented and
+// then asked the server to believe -- so the roster listed machine ids, a challenge
+// belonged to whichever group the browser claimed, and anyone holding a challenge id
+// could read someone else's plan. `userId` is now the Firebase uid, and the server
+// takes it from the token rather than from anything sent here; these variables only
+// decide what to RENDER. They stay populated in the unauthenticated local mode so a
+// `git clone && python main.py` still runs with no GCP setup at all.
 let userId = localStorage.getItem('ca_user') ||
              ('u_' + Math.random().toString(36).slice(2, 10));
 localStorage.setItem('ca_user', userId);
 let groupId = localStorage.getItem('ca_group') || ('grp_' + userId);
 localStorage.setItem('ca_group', groupId);
+
+//: Set once sign-in completes. `token()` returns a FRESH id token: Firebase ones last
+//: an hour, and a FORGE turn can run for four minutes on the far side of a long
+//: interview, so a token grabbed at page load is not good enough.
+let auth = { on: false, user: null, token: async () => null, signOut: async () => {} };
+const authHeaders = async () => {
+  if (!auth.on) return {};
+  const t = await auth.token();
+  return t ? { Authorization: 'Bearer ' + t } : {};
+};
+
+//: Every call to our own server goes through here. Missing one would not fail loudly
+//: -- it would 401 in a poll and surface as the offline dot.
+async function authedFetch(url, opts = {}) {
+  const headers = Object.assign({}, opts.headers || {}, await authHeaders());
+  return fetch(url, Object.assign({}, opts, { headers }));
+}
 
 let sessionId = null;
 let challengeId = new URLSearchParams(location.search).get('id');
@@ -415,8 +471,17 @@ document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
 });
 
 async function api(path, opts) {
-  const r = await fetch('/api' + path, opts);
-  if (!r.ok) throw new Error(path + ' -> ' + r.status);
+  const r = await authedFetch('/api' + path, opts);
+  if (!r.ok) {
+    // 401/403 are not server faults and must not be rendered as "offline". They mean
+    // "sign in" and "you have not joined this quest", which are things the person can
+    // actually do something about.
+    const detail = await r.json().then(j => j.detail).catch(() => '');
+    const e = new Error(path + ' -> ' + r.status + (detail ? ': ' + detail : ''));
+    e.status = r.status;
+    e.detail = detail;
+    throw e;
+  }
   return r.json();
 }
 
@@ -500,7 +565,7 @@ async function ensureSession(force) {
   const wanted = 's_' + Math.random().toString(36).slice(2, 10);
   const state = { user_id: userId, group_id: groupId };
   if (challengeId) state.challenge_id = challengeId;
-  const r = await fetch(`/apps/${APP_NAME}/users/${userId}/sessions`, {
+  const r = await authedFetch(`/apps/${APP_NAME}/users/${userId}/sessions`, {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ session_id: wanted, state }),
   });
@@ -516,7 +581,7 @@ async function ensureSession(force) {
 // Without this, every send after a restart fails and the user has no idea that
 // reloading would fix it. Rebuild the session and retry once.
 async function startRun(text) {
-  const post = () => fetch('/run_sse', {
+  const post = () => authedFetch('/run_sse', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
       appName: APP_NAME, userId, sessionId, streaming: false,
@@ -787,7 +852,7 @@ function showFailure(e, text, streamed) {
 // Pick it up so the header, map and journal bind to the new quest automatically.
 async function adoptChallengeFromSession() {
   try {
-    const r = await fetch(`/apps/${APP_NAME}/users/${userId}/sessions/${sessionId}`);
+    const r = await authedFetch(`/apps/${APP_NAME}/users/${userId}/sessions/${sessionId}`);
     if (!r.ok) return;
     const s = await r.json();
     const cid = s?.state?.challenge_id;
@@ -1264,16 +1329,25 @@ async function pickChallenge() {
 //: The roster is the only proof a teammate actually arrived. Facts alone are not
 //: enough -- someone can be reading the quest for ten minutes before they discover
 //: anything, and until they do the app would look single-player.
+//: The roster used to read "you and u_9a3d0a, trace_55eb8a45" -- machine ids, on the
+//: pane whose entire job is to show that other PEOPLE are here. The server now sends
+//: {id, name, picture} taken from a verified Google token, so a name on this list was
+//: proved by Google rather than typed into a box. Plain strings are still accepted so
+//: the pane keeps working against an unauthenticated local server.
 function drawParty(members) {
-  const others = members.filter(m => m !== userId);
+  const people = (members || []).map(m =>
+    typeof m === 'string' ? { id: m, name: m.slice(0, 8), picture: '' } : m);
+  const others = people.filter(m => m.id !== userId);
   // You may not be on the roster yet -- membership is recorded the first time you
   // actually talk to the agents, not merely for opening the page. Count yourself
   // either way, so the badge and the sentence never disagree.
   const total = others.length + 1;
   $('c-party').textContent = total;
+  const chip = m => (m.picture
+    ? `<img class="face" src="${esc(m.picture)}" alt="" referrerpolicy="no-referrer">`
+    : '') + `<b>${esc(m.name || m.id)}</b>`;
   $('roster').innerHTML = others.length
-    ? `<b>${total}</b> on this quest — you and ${
-        others.map(m => `<b>${esc(m)}</b>`).join(', ')}.`
+    ? `<b>${total}</b> on this quest — you and ${others.map(chip).join(', ')}.`
     : 'Just you so far. Hit Invite and send someone the link.';
 }
 
@@ -1291,6 +1365,11 @@ $('invite').onclick = e => {
 let joined = null;
 async function joinParty() {
   if (!challengeId || joined === challengeId) return;
+  // With auth on, joining is the user's decision (see offerToJoin). Auto-posting it
+  // here would mean opening a URL silently added your name to a stranger's party --
+  // which is the "possession of the link is access" model we deliberately dropped.
+  // The owner is already a member: save_charter puts them there.
+  if (auth.on) return;
   joined = challengeId;
   try {
     await api(`/challenges/${challengeId}/join`, {
@@ -1356,15 +1435,134 @@ async function refresh(relist) {
     // A dot changing colour is not a message. It is also the entire signal for a
     // colour-blind user, and it was the ONLY thing that happened when the read API
     // stopped answering -- so a stale map looked exactly like a quiet one.
+    // An invite link now lands here first: you can see a quest only after you join
+    // it, and joining is a deliberate act rather than a side effect of opening a URL.
+    // Rendering that as "offline" would be a lie about a working server.
+    if (e.status === 403) return offerToJoin();
+    if (e.status === 401) return;   // the gate is already up; nothing to say twice
     setLive(false);
     console.error(e);
   }
 }
 
+//: The join step an invite link leads to. Deliberately a button rather than an
+//: automatic POST: joining puts your name on someone else's party, and that should be
+//: something you did, not something a URL did to you.
+let joinOffered = null;
+function offerToJoin() {
+  setLive(true);
+  if (joinOffered === challengeId) return;
+  joinOffered = challengeId;
+  $('title').className = 'empty';
+  $('title').textContent = 'someone invited you to a quest';
+  const node = bubble('bot', 'warden',
+    'You have been invited to a quest. Join it to see the map, the journal and the ' +
+    'tools that have already been built for it.');
+  const btn = document.createElement('button');
+  btn.className = 'send';
+  btn.style.marginTop = '10px';
+  btn.textContent = 'Join this quest';
+  btn.onclick = async () => {
+    btn.disabled = true;
+    btn.textContent = 'Joining…';
+    try {
+      await api(`/challenges/${challengeId}/join`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ user_id: userId }),
+      });
+      joined = challengeId;
+      node.remove();
+      await refresh(true);
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = 'Join this quest';
+      bubble('act', null, 'Could not join: ' + (err.detail || err.message));
+    }
+  };
+  node.querySelector('.body').appendChild(btn);
+}
+
+// --- sign-in ----------------------------------------------------------------------
+//
+// The server decides whether auth is on; this file only obeys. /api/auth/config is
+// public precisely so this fetch can happen before anyone has a token -- a page that
+// needed a token to learn how to get a token would be a closed loop.
+//
+// The Firebase SDK is imported dynamically rather than with a <script type=module>
+// tag so that a deployment with auth off, or one that cannot reach gstatic, still
+// renders the app instead of a blank page.
+async function startAuth() {
+  let cfg;
+  try {
+    cfg = await fetch('/api/auth/config').then(r => r.json());
+  } catch {
+    return;                       // no config endpoint: an older server. Run open.
+  }
+  if (!cfg.enabled || !cfg.required) return;
+
+  const V = '10.12.2';
+  const [{ initializeApp }, fb] = await Promise.all([
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-app.js`),
+    import(`https://www.gstatic.com/firebasejs/${V}/firebase-auth.js`),
+  ]);
+  const fbAuth = fb.getAuth(initializeApp({
+    apiKey: cfg.apiKey, authDomain: cfg.authDomain, projectId: cfg.projectId,
+  }));
+
+  const gate = $('gate'), err = $('gate-err');
+  const show = (msg) => { err.hidden = !msg; err.textContent = msg || ''; };
+  gate.hidden = false;
+
+  $('gate-in').onclick = async () => {
+    show('');
+    try {
+      const provider = new fb.GoogleAuthProvider();
+      await fb.signInWithPopup(fbAuth, provider);
+    } catch (e) {
+      // The two that actually happen: a blocked popup, and a domain that is not on
+      // Firebase's authorised list. Both look like "nothing happened" without this.
+      show(e?.code === 'auth/popup-blocked'
+        ? 'Your browser blocked the sign-in popup. Allow popups for this site and try again.'
+        : e?.code === 'auth/unauthorized-domain'
+        ? `This domain is not authorised in Firebase Auth (${location.hostname}).`
+        : (e?.message || String(e)));
+    }
+  };
+
+  // Resolves the first time we know whether someone is signed in. onIdTokenChanged
+  // rather than onAuthStateChanged: it also fires on token refresh, which is what
+  // keeps a four-minute FORGE turn from running out of token halfway through.
+  await new Promise(resolve => {
+    fb.onIdTokenChanged(fbAuth, user => {
+      auth = {
+        on: true, user,
+        token: () => user ? user.getIdToken() : Promise.resolve(null),
+        signOut: () => fb.signOut(fbAuth),
+      };
+      if (!user) { gate.hidden = false; return; }
+      // The uid IS the identity now. The server ignores anything else we send.
+      userId = user.uid;
+      groupId = 'grp_' + user.uid;
+      localStorage.setItem('ca_user', userId);
+      localStorage.setItem('ca_group', groupId);
+      $('whoami').textContent = user.displayName || user.email || '';
+      $('whoami').hidden = false;
+      $('signout').hidden = false;
+      $('who').hidden = false;
+      gate.hidden = true;
+      resolve();
+    });
+  });
+}
+
+$('signout').onclick = async () => {
+  await auth.signOut();
+  location.reload();               // simplest way to guarantee no stale state lingers
+};
+
 bubble('bot', 'warden',
   "Tell me something you want to be true that isn't yet.\n\n" +
   "I'll ask a few questions, map it into quests, then build the tools each one needs.");
-refresh();
 
 // The old line was `setInterval(() => { if (!busy) refresh(); }, 4000)`, which froze
 // the entire read side for the whole length of a run -- and a FORGE run is a minute.
@@ -1374,10 +1572,18 @@ refresh();
 // interesting thing this product does was invisible while it happened.
 //
 // Poll FASTER while a run is live, not slower.
-(function poll() {
-  refresh().finally(() => setTimeout(poll, busy ? 1200 : 4000));
-})();
-$('input').focus();
+//
+// Nothing starts polling until sign-in has resolved. Starting first and letting the
+// early requests 401 would paint the offline dot and fill the console with failures
+// that look like a broken server on the one screen a judge sees first.
+startAuth()
+  .catch(e => console.error('sign-in setup failed', e))
+  .then(() => {
+    (function poll() {
+      refresh().finally(() => setTimeout(poll, busy ? 1200 : 4000));
+    })();
+    $('input').focus();
+  });
 </script>
 </body>
 </html>

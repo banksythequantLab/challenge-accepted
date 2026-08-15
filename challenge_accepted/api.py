@@ -14,9 +14,11 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from .authgate import current
+from .services import auth
 from .services.store import store
 
 router = APIRouter(prefix="/api", tags=["challenge"])
@@ -47,6 +49,54 @@ def _challenge_or_404(challenge_id: str) -> dict[str, Any]:
     if not challenge:
         raise HTTPException(status_code=404, detail=f"No challenge {challenge_id}")
     return challenge
+
+
+def _members(challenge: dict[str, Any]) -> list[str]:
+    group = store.get("groups", str(challenge.get("group_id") or "")) or {}
+    return [str(m) for m in (group.get("members") or [])]
+
+
+def _mine(challenge_id: str, caller: auth.Caller) -> dict[str, Any]:
+    """The challenge, if this caller is on its party.
+
+    Membership -- not possession of the id -- is what grants access. An invite link is
+    an invitation to JOIN, and joining is a separate, deliberate act (`POST .../join`).
+    Before this, any id that leaked in a screenshot or a shared URL handed over
+    somebody's whole plan, their journal and the tools built for them.
+
+    With CA_AUTH off there is no caller to check, so this degrades to the old
+    behaviour. That is the honest meaning of "auth off", and /healthz reports it.
+    """
+    challenge = _challenge_or_404(challenge_id)
+    if not auth.required():
+        return challenge
+    if caller.uid == str(challenge.get("owner_id") or ""):
+        return challenge
+    if caller.uid in _members(challenge):
+        return challenge
+    # 403 rather than 404: pretending it does not exist would be a lie the UI cannot
+    # act on, and the id was already known to whoever asked.
+    raise HTTPException(
+        status_code=403,
+        detail="You have not joined this quest yet. Open the invite link and join.")
+
+
+def _party(challenge: dict[str, Any]) -> list[dict[str, str]]:
+    """The roster as people rather than ids.
+
+    `u_9a3d0a, trace_55eb8a45` was what a teammate actually saw in the Party pane.
+    Profiles are written on join from the verified token, so a name here was proved by
+    Google rather than typed into a box.
+    """
+    out = []
+    for uid in _members(challenge):
+        profile = store.get("users", uid) or {}
+        out.append({
+            "id": uid,
+            "name": str(profile.get("name") or uid[:8]),
+            "picture": str(profile.get("picture") or ""),
+        })
+    return out
 
 
 def _depth(node_id: str, by_id: dict[str, dict], seen: Optional[set[str]] = None) -> int:
@@ -97,11 +147,31 @@ def healthz() -> dict[str, Any]:
     }
 
 
+@router.get("/auth/config")
+def auth_config() -> dict[str, Any]:
+    """What the browser needs to start a Google sign-in, and nothing else.
+
+    Public by design -- the Firebase API key identifies the project, it does not
+    authorise anything, and the browser cannot sign in without knowing which project
+    to sign in to. Served from the environment rather than baked into app.html so a
+    fork does not ship our project id.
+    """
+    return auth.browser_config()
+
+
+@router.get("/me")
+def me(caller: auth.Caller = Depends(current)) -> dict[str, Any]:
+    """Who the server thinks you are. The UI renders this, so a wrong answer is loud."""
+    return {"uid": caller.uid, "name": caller.display, "email": caller.email,
+            "picture": caller.picture, "auth": auth.AUTH_MODE}
+
+
 @router.get("/challenges")
 def list_challenges(
     group_id: Optional[str] = None,
     limit: int = 50,
     counts: bool = False,
+    caller: auth.Caller = Depends(current),
 ) -> dict[str, Any]:
     """Challenges, newest first. This fills the quest picker.
 
@@ -112,7 +182,15 @@ def list_challenges(
     linearly with every quest any previous visitor had ever created.
     `scripts\\check_poll_cost.py` fails the build if it comes back.
     """
-    rows = store.list_challenges(group_id)[:max(0, limit)]
+    # The picker is not a directory of everyone's goals. Before auth it listed every
+    # challenge in the store, so a new visitor's first screen was a dropdown of
+    # strangers' plans -- and that was also the reason the poll-cost bug hurt.
+    if auth.required():
+        rows = [c for c in store.list_challenges(None)
+                if caller.uid == str(c.get("owner_id") or "")
+                or caller.uid in _members(c)][:max(0, limit)]
+    else:
+        rows = store.list_challenges(group_id)[:max(0, limit)]
     out = []
     for c in rows:
         row = {
@@ -132,9 +210,10 @@ def list_challenges(
 
 
 @router.get("/challenges/{challenge_id}")
-def get_challenge(challenge_id: str) -> dict[str, Any]:
+def get_challenge(challenge_id: str,
+                  caller: auth.Caller = Depends(current)) -> dict[str, Any]:
     """Everything the UI needs for one challenge, in a single round trip."""
-    challenge = _challenge_or_404(challenge_id)
+    challenge = _mine(challenge_id, caller)
     group = store.get("groups", str(challenge.get("group_id", ""))) or {}
     nodes = store.list_nodes(challenge_id)
     return {
@@ -151,12 +230,13 @@ def get_challenge(challenge_id: str) -> dict[str, Any]:
         "group_facts": group.get("shared_facts", []),
         # Who else is on this. The UI shows the count so a second browser joining is
         # visible without waiting for that teammate to discover something.
-        "party": group.get("members", []),
+        "party": _party(challenge),
     }
 
 
 @router.post("/challenges/{challenge_id}/join")
-def join_challenge(challenge_id: str, body: JoinIn) -> dict[str, Any]:
+def join_challenge(challenge_id: str, body: JoinIn,
+                   caller: auth.Caller = Depends(current)) -> dict[str, Any]:
     """Put the caller on this challenge's party roster.
 
     Joining is a UI act, not an agent decision. The first version relied on the model
@@ -166,18 +246,29 @@ def join_challenge(challenge_id: str, body: JoinIn) -> dict[str, Any]:
     watching two browsers would have seen "1 in party" on both. Deterministic beats
     clever: the browser says who it is on load, and the roster is right immediately.
     """
+    # The ONE route that is authenticated but not membership-gated -- joining is how
+    # you become a member, so gating it on membership would lock the door from the
+    # inside. `body.user_id` is ignored once auth is on: it is a client claim, and
+    # honouring it would let anyone add anyone to any party.
     challenge = _challenge_or_404(challenge_id)
     group_id = str(challenge.get("group_id") or "")
     if not group_id:
         raise HTTPException(status_code=409, detail="Challenge has no group")
-    members = store.join_group(group_id, body.user_id)
-    return {"status": "ok", "group_id": group_id, "party": members}
+    uid = caller.uid if auth.required() else body.user_id
+    if auth.required():
+        # Written on every join so a name change in the Google account shows up, and
+        # so the roster can render people without a second lookup service.
+        store.put_user(uid, {"name": caller.display, "email": caller.email,
+                             "picture": caller.picture})
+    store.join_group(group_id, uid)
+    return {"status": "ok", "group_id": group_id, "party": _party(challenge)}
 
 
 @router.get("/challenges/{challenge_id}/graph")
-def get_graph(challenge_id: str, include_superseded: bool = False) -> dict[str, Any]:
+def get_graph(challenge_id: str, include_superseded: bool = False,
+              caller: auth.Caller = Depends(current)) -> dict[str, Any]:
     """React Flow nodes and edges, laid out by dependency depth."""
-    _challenge_or_404(challenge_id)
+    _mine(challenge_id, caller)
     return _build_graph(store.list_nodes(challenge_id),
                         store.list_tools(challenge_id),
                         include_superseded)
@@ -241,9 +332,10 @@ def _build_graph(raw: list[dict[str, Any]], all_tools: list[dict[str, Any]],
 
 
 @router.get("/challenges/{challenge_id}/journal")
-def get_journal(challenge_id: str, limit: int = 100) -> dict[str, Any]:
+def get_journal(challenge_id: str, limit: int = 100,
+                caller: auth.Caller = Depends(current)) -> dict[str, Any]:
     """The 'takes notes' surface. Newest last, so the UI can append and autoscroll."""
-    _challenge_or_404(challenge_id)
+    _mine(challenge_id, caller)
     # One read. This used to call list_journal twice -- once for the window, once to
     # count -- which is two Firestore queries for a number you already have.
     entries = store.list_journal(challenge_id)
@@ -251,7 +343,8 @@ def get_journal(challenge_id: str, limit: int = 100) -> dict[str, Any]:
 
 
 @router.get("/challenges/{challenge_id}/dashboard")
-def get_dashboard(challenge_id: str, journal_limit: int = 100) -> dict[str, Any]:
+def get_dashboard(challenge_id: str, journal_limit: int = 100,
+                  caller: auth.Caller = Depends(current)) -> dict[str, Any]:
     """Everything the dashboard polls for, in ONE round trip.
 
     The UI needs the summary, the graph, the journal and the tools together, and it
@@ -263,7 +356,7 @@ def get_dashboard(challenge_id: str, journal_limit: int = 100) -> dict[str, Any]
     The four endpoints stay: they are a clearer API to read, and the checks use them.
     This is what the browser uses.
     """
-    challenge = _challenge_or_404(challenge_id)
+    challenge = _mine(challenge_id, caller)
     group = store.get("groups", str(challenge.get("group_id", ""))) or {}
     nodes = store.list_nodes(challenge_id)
     tools = store.list_tools(challenge_id)
@@ -283,7 +376,7 @@ def get_dashboard(challenge_id: str, journal_limit: int = 100) -> dict[str, Any]
                 "tools": len(tools),
             },
             "group_facts": group.get("shared_facts", []),
-            "party": group.get("members", []),
+            "party": _party(challenge),
         },
         "graph": _build_graph(nodes, tools),
         "journal": {"entries": journal[-journal_limit:], "total": len(journal)},
@@ -292,25 +385,28 @@ def get_dashboard(challenge_id: str, journal_limit: int = 100) -> dict[str, Any]
 
 
 @router.get("/challenges/{challenge_id}/tools")
-def get_tools(challenge_id: str) -> dict[str, Any]:
-    _challenge_or_404(challenge_id)
+def get_tools(challenge_id: str,
+              caller: auth.Caller = Depends(current)) -> dict[str, Any]:
+    _mine(challenge_id, caller)
     return {"tools": store.list_tools(challenge_id)}
 
 
 @router.get("/challenges/{challenge_id}/feedback")
-def get_feedback(challenge_id: str) -> dict[str, Any]:
-    _challenge_or_404(challenge_id)
+def get_feedback(challenge_id: str,
+                 caller: auth.Caller = Depends(current)) -> dict[str, Any]:
+    _mine(challenge_id, caller)
     return {"feedback": store.list_feedback(challenge_id)}
 
 
 @router.post("/challenges/{challenge_id}/feedback", status_code=201)
-def post_feedback(challenge_id: str, body: FeedbackIn) -> dict[str, Any]:
+def post_feedback(challenge_id: str, body: FeedbackIn,
+                  caller: auth.Caller = Depends(current)) -> dict[str, Any]:
     """Thumbs up/down straight from the UI, without going through an agent turn.
 
     The track brief asks for "a clear way to capture feedback". A button that writes
     directly is clearer than hoping the user phrases it so the Coach notices.
     """
-    _challenge_or_404(challenge_id)
+    _mine(challenge_id, caller)
     if body.verdict not in ("up", "down"):
         raise HTTPException(status_code=422, detail="verdict must be 'up' or 'down'")
     fid = store.add_feedback(challenge_id, body.model_dump())

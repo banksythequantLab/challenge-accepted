@@ -25,7 +25,18 @@ param(
     [string]$AgentEngineId = "3470843198807474176",
     [string]$AgentEngineLocation = "us-central1",
     [switch]$KeepWarm,  # min-instances=1: use from the day you start rehearsing
-    [switch]$ForgeDebug # CA_FORGE_DEBUG=1: make the FORGE phase say what it is doing
+    [switch]$ForgeDebug, # CA_FORGE_DEBUG=1: make the FORGE phase say what it is doing
+
+    # Google Sign-In. -FirebaseApiKey is the browser key from the Firebase web app
+    # config; it is not a secret (every Firebase web app ships it) but it is per
+    # project, so it is passed in rather than committed.
+    #
+    # Both are required together on purpose. Deploying with CA_AUTH=required and no
+    # key gives you a locked service whose front end cannot offer a sign-in button --
+    # a 401 wall with no door, which is the worst of both states.
+    [switch]$Auth,
+    [string]$FirebaseApiKey = "",
+    [string]$FirebaseAuthDomain = ""
 )
 
 # NOT "Stop". gcloud writes advisories to STDERR -- e.g.
@@ -108,6 +119,24 @@ if ($AgentEngineId) {
 } else {
     Write-Host "==> Memory Bank OFF (no -AgentEngineId)" -ForegroundColor Yellow
 }
+if ($Auth) {
+    if (-not $FirebaseApiKey) {
+        Write-Host "==> REFUSING: -Auth needs -FirebaseApiKey." -ForegroundColor Red
+        Write-Host "    Firebase console -> Project settings -> Your apps -> Web app -> apiKey"
+        Write-Host "    Deploying auth without it locks the service behind a sign-in"
+        Write-Host "    button the browser cannot render."
+        exit 1
+    }
+    $domain = if ($FirebaseAuthDomain) { $FirebaseAuthDomain } else { "$ProjectId.firebaseapp.com" }
+    $envList += "CA_AUTH=required"
+    $envList += "CA_FIREBASE_API_KEY=$FirebaseApiKey"
+    $envList += "CA_FIREBASE_AUTH_DOMAIN=$domain"
+    Write-Host "==> Google Sign-In REQUIRED (authDomain $domain)" -ForegroundColor Cyan
+    Write-Host "==> ADK dev UI is disabled while auth is on (it is an open console)" -ForegroundColor Yellow
+} else {
+    Write-Host "==> Google Sign-In OFF -- anyone can read any challenge" -ForegroundColor Yellow
+}
+
 # Sessions are NOT moved by this. AGENT_ENGINE_ID switches memory only; conversations
 # stay on the Firestore session service unless CA_SESSIONS=agentengine is set too.
 $envVars = $envList -join ","

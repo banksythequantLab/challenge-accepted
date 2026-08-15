@@ -102,6 +102,8 @@ class Store:
             "journal": {},
             "feedback": {},
             "groups": {},
+            #: uid -> {name, email, picture}, written from a verified Google token.
+            "users": {},
             # ADK conversations. See services/session_store.py for why these live here
             # rather than in the per-instance SQLite file ADK defaults to.
             "sessions": {},
@@ -188,6 +190,17 @@ class Store:
         }
         self._put("tools", tid, doc)
         return tid
+
+    def put_user(self, uid: str, profile: dict[str, Any]) -> None:
+        """The name and avatar behind a uid, as Google stated them.
+
+        Kept apart from the group roster on purpose: a group stores ids, so renaming
+        yourself does not mean rewriting every party you belong to. Merged rather than
+        replaced so a later write with a thinner token cannot blank a name.
+        """
+        clean = {k: v for k, v in profile.items() if v}
+        if clean:
+            self._patch("users", uid, {**clean, "updated_at": _now()})
 
     def add_journal(self, challenge_id: str, entry: dict[str, Any]) -> str:
         jid = new_id("j_")

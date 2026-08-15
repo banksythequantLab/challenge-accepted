@@ -15,9 +15,9 @@ import uvicorn
 from fastapi.responses import FileResponse
 from google.adk.cli.fast_api import get_fast_api_app
 
-from challenge_accepted import config
+from challenge_accepted import authgate, config
 from challenge_accepted.api import router as api_router
-from challenge_accepted.services import session_store
+from challenge_accepted.services import auth, session_store
 
 AGENTS_DIR = str(Path(__file__).parent)
 
@@ -72,9 +72,15 @@ app = get_fast_api_app(
     session_service_uri=_session_uri(),
     memory_service_uri=_memory_uri(),
     allow_origins=os.getenv("CA_ALLOW_ORIGINS", "*").split(","),
-    web=True,                      # ADK dev UI at / -- useful for the demo video
+    # The ADK dev UI is a genuinely useful thing to show in a demo -- and it is an
+    # unauthenticated console that can run agents as any user id you type. It stays on
+    # for local development and goes away the moment auth is required, because a gate
+    # with a second door next to it is a decoration.
+    web=not auth.required(),
     trace_to_cloud=config.use_cloud_trace(),
 )
+
+authgate.install(app)
 
 
 #: Read API for the front end. The ADK app owns /run and /run_sse; this owns /api/*.
@@ -104,8 +110,20 @@ def healthz() -> dict[str, object]:
         # about Memory Bank is only checkable if the deploy will state it out loud.
         "memory": "agentengine" if config.use_memory_bank() else "none",
         "sessions": "agentengine" if config.use_vertex_sessions() else "firestore",
+        # Stated out loud so "is auth on?" is answerable from outside the box. A
+        # deployment that shipped with the gate off would otherwise look identical.
+        "auth": auth.AUTH_MODE,
+        "auth_configured": auth.browser_config()["enabled"],
         "models": {"reasoning": config.MODEL_REASONING, "cheap": config.MODEL_CHEAP},
     }
+
+
+@app.get("/", include_in_schema=False)
+def root():
+    """With the dev UI off, / would 404 -- which is what a judge would type first."""
+    from fastapi.responses import RedirectResponse
+
+    return RedirectResponse("/app")
 
 
 if __name__ == "__main__":

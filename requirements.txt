@@ -9,6 +9,10 @@ google-cloud-aiplatform>=1.126.0
 # deploy with CA_TRACE_TO_CLOUD=1 dies at import with ModuleNotFoundError before the
 # port is bound -- which is exactly how revision 00014 failed.
 opentelemetry-exporter-gcp-trace>=1.9.0
+# Google Sign-In. Imported lazily by services/auth.py and only when CA_AUTH=required,
+# so the test suite and every offline check still run without it -- but it must be in
+# the image, or the first authenticated request 500s instead of 401ing.
+firebase-admin>=6.6.0
 fastapi==0.141.1
 uvicorn[standard]==0.46.0
 pydantic==2.13.3
