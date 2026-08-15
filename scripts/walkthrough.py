@@ -12,7 +12,7 @@ every console error, page error and failed request as they happen.
 
     python scripts\\walkthrough.py https://challengeaccepted.app
 
-Writes _walk_NN_*.png. Exits 1 only if the browser reported an error or a beat timed out.
+Writes _walk/NN_*.png (gitignored). Exits 1 only if the browser reported an error or a beat timed out.
 """
 
 from __future__ import annotations
@@ -67,7 +67,10 @@ def main(base: str) -> int:
 
         def shot(name):
             n[0] += 1
-            path = ROOT / f"_walk_{n[0]:02d}_{name}.png"
+            # Keep the run's output out of the repo root -- these are scratch, not source.
+            out = ROOT / "_walk"
+            out.mkdir(exist_ok=True)
+            path = out / f"{n[0]:02d}_{name}.png"
             page.screenshot(path=str(path))
             return path.name
 
