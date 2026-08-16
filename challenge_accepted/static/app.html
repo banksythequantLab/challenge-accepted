@@ -893,6 +893,14 @@ async function send(retryText) {
           // Attribute every action. Four Toolwrights building in parallel used to
           // render as an anonymous column of "writing code..." -- the single most
           // impressive thing the system does, displayed as if one agent were stuttering.
+          // Adopt the challenge the MOMENT the charter is saved, not when the turn
+          // ends. `adoptChallengeFromSession()` runs after the stream closes, so on a
+          // first run the browser had no challenge_id for the whole of FORGE -- it
+          // never fetched a dashboard, and the quest map sat empty while twelve nodes
+          // and seven tools were being built behind it. Measured on a recording: the
+          // map appeared at 253s, on a turn that started at 38s. The one thing this
+          // product is worth watching do was invisible for three and a half minutes.
+          if (p.functionResponse) adoptFromTool(p.functionResponse);
           if (p.functionCall) act(ev.author, '⚙ ' + p.functionCall.name);
           if (p.executableCode) act(ev.author, '⌨ writing code…');
           if (p.codeExecutionResult) act(ev.author, '▶ ran it: ' +
@@ -959,6 +967,21 @@ function showFailure(e, text, streamed) {
   again.onclick = () => { again.disabled = true; send(text); };
   body.appendChild(again);
   $('chatlog').scrollTop = $('chatlog').scrollHeight;
+}
+
+//: `save_charter` answers with the new challenge_id. Taking it straight off the wire is
+//: what lets the map draw itself while the agents are still working, instead of
+//: appearing fully formed at the end like a page refresh.
+function adoptFromTool(fr) {
+  const cid = fr && fr.response && fr.response.challenge_id;
+  if (!cid || cid === challengeId) return;
+  challengeId = cid;
+  lastJournal = -1;
+  joined = null;
+  joinOffered = null;
+  rememberChallenge(cid);
+  history.replaceState(null, '', '?id=' + cid);
+  refresh(true);      // the poll is already running; this just stops it waiting 4s
 }
 
 // The Interviewer writes challenge_id into session state once the charter is saved.

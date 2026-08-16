@@ -114,7 +114,14 @@ def main() -> int:
         i = args.index("--dashboard")
         cid = args[i + 1]
         base = (args[0] if i > 0 else DEFAULT_URL).rstrip("/")
-        r = requests.get(f"{base}/api/challenges/{cid}/dashboard", timeout=180)
+        # Reading a challenge needs a member's token now, and --as names which member.
+        who = None
+        if "--as" in args:
+            j = args.index("--as")
+            who = args[j + 1]
+        _auth_for(base, who or "ca_test_reader")
+        r = requests.get(f"{base}/api/challenges/{cid}/dashboard",
+                         headers=AUTH, timeout=180)
         r.raise_for_status()
         bad = check_dashboard(r.json())
         for x in bad:
