@@ -132,7 +132,10 @@ def _check(page, label, vw, vh, touch: bool) -> list[str]:
         bad.append(f"{label}: the quest map rendered no nodes")
 
     # Every control a finger has to hit. A 20px button is a miss, not a tap.
-    for name, sel in (("Send", "#send"), ("Invite", "#invite")):
+    # The theme toggle is in this list because it was added to an already-crowded
+    # header: one more control on a 320px screen is exactly how the tab row ended up
+    # 4px off-screen last time.
+    for name, sel in (("Send", "#send"), ("Invite", "#invite"), ("Theme", "#theme")):
         if page.is_visible(sel):
             box = page.locator(sel).first.bounding_box()
             if box and box["height"] < MIN_TAP:
@@ -189,34 +192,62 @@ def _check(page, label, vw, vh, touch: bool) -> list[str]:
     return bad
 
 
-def _live_challenge(base: str) -> str:
+def _live_challenge(base: str, uid: str | None, cid: str | None) -> str:
     """A real challenge from the deployed API -- one with tools, so the map is populated.
 
     An empty dashboard would pass every assertion here by having nothing to lay out.
-    """
-    import json
-    import urllib.request
 
-    with urllib.request.urlopen(base.rstrip("/") + "/api/challenges?limit=25",
-                                timeout=30) as r:
-        rows = json.load(r)
-    rows = rows if isinstance(rows, list) else rows.get("challenges", [])
-    for row in rows:
-        url = f"{base.rstrip('/')}/api/challenges/{row['id']}/dashboard"
-        with urllib.request.urlopen(url, timeout=30) as r:
-            dash = json.load(r)
+    Since Google Sign-In shipped this needs a token, and the quest list is scoped to
+    the caller: a brand-new test identity legitimately sees nothing, so discovering a
+    challenge means signing in as an identity that owns one. Pass `--as <uid>` for
+    that, or `--challenge <id>` to name one outright.
+    """
+    import requests
+
+    from testauth import mint
+
+    base = base.rstrip("/")
+    headers = {}
+    if requests.get(f"{base}/api/healthz", timeout=30).json().get("auth") == "required":
+        headers = {"Authorization": "Bearer " + mint(uid)}
+        print(f"signed in as {uid or 'a fresh test identity'} to look for a challenge")
+
+    def populated(challenge_id: str) -> tuple[int, int] | None:
+        r = requests.get(f"{base}/api/challenges/{challenge_id}/dashboard",
+                         headers=headers, timeout=60)
+        if not r.ok:
+            print(f"  {challenge_id}: dashboard {r.status_code} "
+                  f"{'(not a member)' if r.status_code == 403 else ''}")
+            return None
+        dash = r.json()
         tools = dash.get("tools")
         tools = (tools.get("tools") if isinstance(tools, dict) else tools) or []
         nodes = (dash.get("graph") or {}).get("nodes") or []
-        if tools and nodes:
-            print(f"live challenge: {row['id']}  ({len(nodes)} nodes, {len(tools)} tools)")
+        return (len(nodes), len(tools)) if nodes and tools else None
+
+    if cid:
+        counts = populated(cid)
+        if not counts:
+            sys.exit(f"FAIL: {cid} is not readable by this identity, or has no map. "
+                     f"Pass --as <uid> for an account that is on its party.")
+        print(f"live challenge: {cid}  ({counts[0]} nodes, {counts[1]} tools)")
+        return cid
+
+    rows = requests.get(f"{base}/api/challenges?limit=25", headers=headers,
+                        timeout=60).json().get("challenges", [])
+    for row in rows:
+        counts = populated(row["id"])
+        if counts:
+            print(f"live challenge: {row['id']}  ({counts[0]} nodes, {counts[1]} tools)")
             return row["id"]
-    sys.exit("FAIL: no deployed challenge has both nodes and tools to lay out.")
+    sys.exit("FAIL: no challenge this identity can read has both nodes and tools. "
+             "Pass --challenge <id> and --as <uid>.")
 
 
-def main(base: str | None = None) -> None:
+def main(base: str | None = None, uid: str | None = None,
+         cid_arg: str | None = None) -> None:
     if base:
-        cid = _live_challenge(base)
+        cid = _live_challenge(base, uid, cid_arg)
         origin = base.rstrip("/")
     else:
         with socket.socket() as s:
@@ -247,7 +278,26 @@ def main(base: str | None = None) -> None:
             page.on("pageerror", lambda e: errors.append(str(e)))
 
             page.goto(f"{origin}/app?id={cid}", wait_until="networkidle")
-            page.wait_for_timeout(1000)
+            # A deployed page now opens on the sign-in gate, and an invite link opens
+            # on a join button. Both are the product working correctly, and both would
+            # otherwise be measured as "the map rendered no nodes".
+            if page.is_visible("#gate"):
+                from testauth import sign_in
+                sign_in(page, uid)
+            join = page.get_by_role("button", name="Join this quest")
+            if join.count():
+                join.first.click()
+                page.wait_for_timeout(2500)
+            # Wait for the MAP, not for a stopwatch. A fixed 1000ms was enough on a
+            # warm local server and not enough for the first device to hit production
+            # cold -- so the Galaxy S9+ reported "the quest map rendered no nodes" on a
+            # challenge that has twelve, and the six devices after it passed. A flaky
+            # check that blames the product is worse than no check.
+            try:
+                page.wait_for_selector("#graph .node", timeout=30000)
+            except Exception:
+                pass          # let the assertion below report it properly
+            page.wait_for_timeout(600)
             vw = page.viewport_size["width"]
             vh = page.viewport_size["height"]
             _p(f"    viewport     : {vw}x{vh}")
@@ -259,8 +309,16 @@ def main(base: str | None = None) -> None:
                 failures.append(f"{label}: console errors {errors}")
             _p(f"    console      : {errors if errors else 'clean'}")
 
-            shot = ROOT / f"_dev_{vw}.png"
-            page.screenshot(path=str(shot))
+            # Both themes, on every device. The theme changes no geometry, so the
+            # assertions above run once -- but the screenshots are the only thing that
+            # has ever caught a colour that stopped being readable at a given size,
+            # and light mode has never been seen on a phone.
+            shots = ROOT / "_walk"
+            shots.mkdir(exist_ok=True)
+            for theme in ("dark", "light"):
+                page.evaluate("t => document.documentElement.dataset.theme = t", theme)
+                page.wait_for_timeout(300)
+                page.screenshot(path=str(shots / f"dev_{vw}_{theme}.png"))
             ctx.close()
         browser.close()
 
@@ -271,8 +329,21 @@ def main(base: str | None = None) -> None:
         sys.exit(1)
 
     where = origin if origin.startswith("https") else "a local server"
-    _p(f"\nthe layout holds on all {len(DEVICES)} viewports, on {where}. wrote _dev_*.png")
+    _p(f"\nthe layout holds on all {len(DEVICES)} viewports, on {where}, in both "
+       f"themes. wrote _walk/dev_*.png")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1] if len(sys.argv) > 1 else None)
+    argv = sys.argv[1:]
+
+    def take(flag: str) -> str | None:
+        if flag in argv:
+            i = argv.index(flag)
+            v = argv[i + 1]
+            del argv[i:i + 2]
+            return v
+        return None
+
+    who = take("--as")
+    which = take("--challenge")
+    main(argv[0] if argv else None, who, which)
