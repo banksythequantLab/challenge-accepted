@@ -3,8 +3,9 @@
 Paste-ready draft. Track: **Collaborative Partner**. Everything factual here was verified
 by running it. Numbers marked *measured* came from instrumented live runs, not estimates.
 
-**Try it:** https://challengeaccepted.app/app · health:
-https://challengeaccepted.app/api/healthz
+**Try it:** https://challengeaccepted.app — sign in with Google · health:
+https://challengeaccepted.app/api/healthz (states the auth mode out loud, so "is it
+actually locked?" is answerable without taking our word for it)
 
 ---
 
@@ -32,6 +33,9 @@ You name something you want to be true that isn't yet. A team of nine agents:
 
 Everything learned lands in **goal-scoped group memory**. When a teammate opens the same
 challenge, their Coach opens with what you discovered — attributed to you by name.
+
+You sign in with Google, and the party roster shows the people on it rather than machine
+ids. Dark and light themes; the app follows your machine and remembers if you disagree.
 
 ## How we built it
 
@@ -64,7 +68,31 @@ the easiest place in a submission to lie by omission:
   service registry. That was a deliberate build, not a fallback — see *Challenges*.
 - **Code execution is ADK's `BuiltInCodeExecutor`**, model-side, not a persistent Agent
   Runtime sandbox. One env var swaps it; the env var is unset.
-- **There is no Firebase Auth.** Users are anonymous ids in `localStorage`.
+- **Sign-in is Google only.** Firebase Authentication, verified server-side with the
+  Admin SDK. There is no email/password tier and no anonymous tier — an anonymous uid
+  is the same fiction we removed, wearing a server-issued costume.
+
+### Identity, and what it actually protects
+
+Until late in the build, identity was a random string the browser generated and the
+server believed. The roster listed `u_9a3d0a`; a challenge belonged to whichever group
+the client claimed; anyone who guessed a challenge id could read someone else's plan.
+
+Adding a login is the easy half. The half that matters is that **ADK takes the user id
+from the URL** (`POST /apps/{app}/users/{user_id}/sessions`) **and from the `/run_sse`
+body** — and those ids are what `save_charter` files a challenge under. Verifying a
+token and then letting the client keep naming itself would be theatre: you could sign in
+as yourself and create a challenge owned by someone else, with a token that verifies
+perfectly. So the gate refuses any request whose stated user is not the verified one,
+and there is a test for each path.
+
+Reading a challenge requires **membership of its party**, not possession of its id. An
+invite link is an invitation to *join* — sign in, join, then see — and joining is a
+button you press, not something a URL does to you.
+
+The ADK dev UI is switched off whenever auth is on. It is an unauthenticated console
+that can run agents as any user id you type into it, which on a public URL is a free
+Gemini endpoint on our bill. A gate with a second door beside it is a decoration.
 
 **Data sources:** user conversation, Google Search grounding (gated, not default-on), and
 the group's own accumulated memory.
@@ -185,6 +213,37 @@ don't call a model — which is the actual lesson.
   rather than printing "Deployed" over it. Three subsystems, found three different ways:
   reading the diff, reading the vendor's source, reading a crash log.
 
+- **A workaround for a problem the framework had already solved, which took the site
+  down.** To check that `/run_sse` was not being run as somebody else, the auth gate has
+  to read the request body. Assuming that consuming it would starve the route
+  downstream, we hand-wrote a replacement `receive()` that hands the body back — on
+  *every* call. `/run_sse` answers with a streaming response, and Starlette sits in a
+  loop on `receive()` waiting for the client to disconnect. It got the body a second
+  time and raised `RuntimeError: Unexpected message received: http.request` **after the
+  HTTP 200 had already gone out**. Every agent run on the site died at 46 ms with zero
+  events and no error the user could see: you typed a message and nothing happened.
+  Starlette caches and replays the body itself; the fix was deleting our code. The unit
+  test had passed because it exercised a *JSON* route, and a JSON route never listens
+  for a disconnect — it asserted the mechanism we had built rather than the thing the
+  product does.
+
+- **Auth silently turned every invite link into a blank page.** One line decided which
+  quest a browser lands on: `if (!known(challengeId)) challengeId = null;`. Correct
+  while `/challenges` returned every quest in the store — and the moment the list became
+  private, a teammate opening an invite link had the id cleared on load. They saw "no
+  quest yet", no map, and no offer to join, because the request that triggers the join
+  prompt was never made. The entire collaborative premise, dead, with nothing anywhere
+  saying so. Found by two signed-in browsers, not by reasoning about the diff.
+
+- **Three test failures that were the test's fault, not the product's.** A browser
+  walkthrough reported `nodes: 0` and "FORGE produced nothing" against a service that
+  had just built seven tools. It was waiting for a spinner the app removes when a
+  response *starts* streaming, then screenshotting a run still in flight. A second
+  check asserted on a dashboard shape it had invented. A third asserted that no tool
+  could be opened from a detail pane it had never opened. Each one looked like a product
+  bug and cost real time — the discipline that eventually pays is asking *"is the
+  measurement wrong?"* before rewriting the thing being measured.
+
 ## Accomplishments we're proud of
 
 - An agent that writes a tool, **executes it, iterates until its own smoke test passes**,
@@ -205,11 +264,32 @@ don't call a model — which is the actual lesson.
   and written by `save_charter` and `complete_node`. `scripts\check_memory.py` proves it
   end to end; `scripts\check_memory_bank.py` sits underneath and round-trips the service
   directly, so a failure tells you whether the infrastructure or the prompt broke.
-- **137 tests plus sixteen live checks**, including a regression test for every bug
-  above. The checks click the actual controls and read the clipboard, the iframe and the
-  resulting prompt string back — `check_feedback.py` follows a thumbs-down all the way
-  into the Quartermaster's instruction, because "the loop is closed" and "the loop is
-  open" look identical from outside.
+- **The party notebook fills itself from the interview.** `remember_group_fact` only
+  fires on a *returning* turn, so a freshly planned challenge greeted its first teammate
+  with "Nothing learned yet" while the charter it had just written held the deadline,
+  the constraints and everything already tried. Those now seed the notebook at
+  `save_charter` — in code, not by asking an agent, because a prompt that says "also
+  record these" is a prompt that can claim it did and not have. Empty form answers are
+  filtered: "None (running solo)" is not a shared discovery.
+- **Dark and light, both measured.** Every colour is a token, including the ones baked
+  into the SVG the quest map emits — left alone, the centrepiece would have stayed
+  near-black on a white page. `check_theme.py` reads the *rendered* luminance of every
+  painted surface and fails if one stayed dark; `check_a11y.py` runs contrast in both
+  themes (worst: 5.60:1 dark, 4.86:1 light, against a 4.5:1 floor).
+- **153 tests plus a live-check suite that signs in**, including a regression test for
+  every bug above. The checks click the actual controls and read the clipboard, the
+  iframe and the resulting prompt string back — `check_feedback.py` follows a
+  thumbs-down all the way into the Quartermaster's instruction, because "the loop is
+  closed" and "the loop is open" look identical from outside.
+- **Locking the doors did not cost us the ability to test them.** Auth made every live
+  check return 401, which would have left the deployed service verifiable only by hand —
+  exactly the gap that let the streaming outage reach a user. The checks now mint a
+  Firebase custom token as an owner-level operation and exchange it for a real ID token;
+  the browser ones reach the page's *own* Firebase instance and sign in through it, so
+  everything after that line is the app a signed-in person actually uses. The only thing
+  skipped is the Google popup. `check_auth_live.py` runs the other way — it is the one
+  check written from outside, where every assertion is something that must *fail*: no
+  token, a forged-but-well-formed token, a real challenge id held as if it had leaked.
 
 ## What we learned
 
@@ -233,6 +313,15 @@ actually recorded next to the sentence the agent said.
 The fourth: **a control nobody can automate is a control nobody notices has died.** The
 feedback button spent months writing rows that no code read, and the thing protecting it
 from discovery was a `window.prompt()` that no browser test could get past.
+
+The fifth, and the one we would tell another team first: **check whether the framework
+already solved it.** The outage that cost us the most was not a hard problem badly
+solved — it was an easy problem solved twice, where our version fought the library's.
+Ten minutes reading `starlette/middleware/base.py` would have saved all of it. The same
+lesson arrived from the other direction when a security change quietly broke a feature
+two files away: scoping the quest list to its owner was correct, and it silently
+invalidated the assumption an invite link depended on. **A change is not finished when
+the thing you changed works.**
 
 ## What's next
 
@@ -263,6 +352,15 @@ Break-even at $29/seat is ~34 challenges per user per month — comfortably abov
   commercial launch.
 - Group memory is goal-scoped and works across users, but there is no per-node assignment
   or presence yet — two people can pick up the same node.
+- **Anyone with an invite link can join.** Joining is deliberate and authenticated, but
+  there is no approval step and no way to remove someone once they are on a party. For a
+  link you choose to send that is the intended behaviour; for a link that leaks it is
+  not, and we would not ship it to paying teams as-is.
+- **Challenges created before sign-in existed are unreachable.** They belong to anonymous
+  localStorage ids that now map to nobody. We abandoned them rather than invent an owner
+  for data we could not attribute.
+- The party roster shows the name and avatar on your Google account. There is no display
+  name of your own, and no way to appear as anything else.
 - **Memory Bank is personal recall, not the party's memory.** It scopes to
   `(app_name, user_id)`, so it carries what *you* said between *your* challenges. A
   teammate joining a party does not inherit it. The shared layer is `remember_group_fact`
