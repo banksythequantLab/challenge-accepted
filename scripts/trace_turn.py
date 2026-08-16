@@ -19,8 +19,27 @@ import uuid
 
 import requests
 
+sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parent))
+
 DEFAULT_URL = "https://challengeaccepted.app"
 APP_NAME = "challenge_accepted"
+
+#: Filled in by main() once the service says auth is required. Empty against a local
+#: server with CA_AUTH=off, so this script runs in both worlds unchanged.
+AUTH: dict[str, str] = {}
+
+
+def _auth_for(base: str, uid: str) -> None:
+    """Sign in as a throwaway test identity if the deployment demands one."""
+    global AUTH
+    health = requests.get(f"{base}/api/healthz", timeout=60).json()
+    if health.get("auth") != "required":
+        _p("auth: off on this deployment -- running unauthenticated\n")
+        return
+    from testauth import mint
+
+    AUTH = {"Authorization": "Bearer " + mint(uid)}
+    _p(f"auth: signed in as {uid}\n")
 
 TURNS = [
     "I want to run a 10k in under 55 minutes by Christmas.",
@@ -103,11 +122,15 @@ def main() -> int:
         return 1 if bad else 0
 
     base = (sys.argv[1] if len(sys.argv) > 1 else DEFAULT_URL).rstrip("/")
-    user = "trace_" + uuid.uuid4().hex[:8]
+    # The user id has to BE the signed-in uid now: the gate refuses a session whose
+    # path names anyone else, which is the whole point of it.
+    user = "ca_test_" + uuid.uuid4().hex[:8]
     session = "s_" + uuid.uuid4().hex[:8]
+    _auth_for(base, user)
 
     r = requests.post(
         f"{base}/apps/{APP_NAME}/users/{user}/sessions",
+        headers=AUTH,
         json={"session_id": session,
               "state": {"user_id": user, "group_id": "grp_" + user}},
         timeout=60)
@@ -121,6 +144,7 @@ def main() -> int:
         _p(f"===== turn {i}: {text[:60]}...")
         with requests.post(
             f"{base}/run_sse",
+            headers=AUTH,
             json={"appName": APP_NAME, "userId": user, "sessionId": session,
                   "streaming": False,
                   "newMessage": {"role": "user", "parts": [{"text": text}]}},
@@ -173,14 +197,15 @@ def main() -> int:
 
     # What did the run actually leave behind?
     d = requests.get(f"{base}/apps/{APP_NAME}/users/{user}/sessions/{session}",
-                     timeout=60)
+                     headers=AUTH, timeout=60)
     state = d.json().get("state", {}) if d.ok else {}
     cid = state.get("challenge_id")
     _p(f"challenge_id in session state: {cid or 'NONE'}")
     if not cid:
         problems.append("no challenge_id was ever written to session state")
     else:
-        dash = requests.get(f"{base}/api/challenges/{cid}/dashboard", timeout=120)
+        dash = requests.get(f"{base}/api/challenges/{cid}/dashboard",
+                            headers=AUTH, timeout=120)
         if not dash.ok:
             problems.append(f"dashboard HTTP {dash.status_code}: {dash.text[:200]}")
         else:

@@ -22,6 +22,7 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 DEFAULT_URL = "https://challengeaccepted.app"
 
 #: Answers broad enough to fit whatever the Interviewer actually asks. The first
@@ -85,6 +86,14 @@ def main(base: str) -> int:
 
         t0 = time.perf_counter()
         page.goto(f"{base}/app", wait_until="networkidle", timeout=90000)
+        # Sign in if the deployment asks for it. A real Google popup cannot be
+        # automated; this reaches the page's own Firebase instance instead, so
+        # everything after this line is the app a signed-in person actually uses.
+        if page.is_visible("#gate"):
+            from testauth import sign_in
+            who = sign_in(page)
+            _p(f"signed in as {who}")
+            shot("signed-in")
         page.wait_for_timeout(2500)
         marks.append(("cold open", time.perf_counter() - t0, shot("cold")))
         _p(f"cold open: {marks[-1][1]:.1f}s")

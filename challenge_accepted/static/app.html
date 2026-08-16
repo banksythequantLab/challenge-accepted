@@ -458,7 +458,10 @@ async function authedFetch(url, opts = {}) {
 }
 
 let sessionId = null;
-let challengeId = new URLSearchParams(location.search).get('id');
+//: The id someone sent you. Kept separately and never cleared, because "not in your
+//: list" and "not a real quest" are different things and only one of them is a dead end.
+const invitedId = new URLSearchParams(location.search).get('id');
+let challengeId = invitedId;
 let selected = null, lastJournal = -1, busy = false;
 //: Kept around so "Copy for Claude" can package a step with the goal it serves and
 //: the full source of any tool built for it -- the graph endpoint only carries stubs.
@@ -1311,8 +1314,15 @@ async function pickChallenge() {
     || '<option value="">— no quests yet —</option>';
   p.style.display = challenges.length ? '' : 'none';
 
+  // An id you were INVITED to is not in your list yet -- that is what joining is for.
+  //
+  // This line used to be `if (!known(challengeId)) challengeId = null;`, which was
+  // correct while /challenges returned every quest in the store. Auth scoped that list
+  // to your own, so from the moment sign-in shipped, every invite link cleared itself
+  // on load: the teammate saw "no quest yet", no map, and no offer to join. The link
+  // was a dead end and nothing anywhere said so.
   const known = id => id && challenges.some(c => c.id === id);
-  if (!known(challengeId)) challengeId = null;
+  if (!known(challengeId) && challengeId !== invitedId) challengeId = null;
   if (!challengeId && known(localStorage.getItem('ca_last')))
     challengeId = localStorage.getItem('ca_last');
 
@@ -1440,6 +1450,14 @@ async function refresh(relist) {
     // Rendering that as "offline" would be a lie about a working server.
     if (e.status === 403) return offerToJoin();
     if (e.status === 401) return;   // the gate is already up; nothing to say twice
+    if (e.status === 404 && challengeId === invitedId) {
+      // A link to a quest that no longer exists. Saying "offline" would send someone
+      // to check their wifi over a quest that was deleted.
+      challengeId = null;
+      setLive(true);
+      $('title').textContent = 'that quest no longer exists';
+      return;
+    }
     setLive(false);
     console.error(e);
   }

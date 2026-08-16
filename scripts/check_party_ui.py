@@ -17,6 +17,9 @@ from __future__ import annotations
 
 import sys
 import uuid
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 DEFAULT_URL = "https://challengeaccepted.app"
 
@@ -28,8 +31,13 @@ def _p(s: str) -> None:
 def open_as(browser, base: str, user: str, url: str):
     """A browser that has never seen this app, wearing a specific identity.
 
-    Identity today is a localStorage id, so a second *context* is a second person.
-    Seeding it before any script runs is what stops both tabs being the same user.
+    A second browser CONTEXT is a second person: separate cookies, separate storage,
+    separate Firebase session. Two tabs would share one sign-in and quietly test
+    nothing.
+
+    Since auth landed, the identity is a real Google-verified uid rather than a
+    localStorage string, so the seeding below only matters against an unauthenticated
+    local server. On production the page signs in and overwrites it.
     """
     ctx = browser.new_context(
         viewport={"width": 1440, "height": 900},
@@ -41,8 +49,26 @@ def open_as(browser, base: str, user: str, url: str):
     """)
     page = ctx.new_page()
     page.goto(url, wait_until="networkidle", timeout=90000)
+    if page.is_visible("#gate"):
+        from testauth import sign_in
+        user = sign_in(page, user)
     page.wait_for_timeout(3000)
-    return ctx, page
+    return ctx, page, user
+
+
+def take_the_invite(page) -> bool:
+    """Click 'Join this quest' if the app is offering it.
+
+    This IS the membership model: holding the link gets you an invitation, not the
+    data. Anyone arriving on a quest they have not joined sees this button, and a
+    check that skipped it would be asserting against an empty screen.
+    """
+    btn = page.get_by_role("button", name="Join this quest")
+    if not btn.count():
+        return False
+    btn.first.click()
+    page.wait_for_timeout(2500)
+    return True
 
 
 def snapshot(page) -> dict:
@@ -58,12 +84,18 @@ def main() -> int:
     if len(sys.argv) < 2:
         _p("usage: check_party_ui.py <challenge_id> [base_url]")
         return 2
-    cid = sys.argv[1]
-    base = (sys.argv[2] if len(sys.argv) > 2 else DEFAULT_URL).rstrip("/")
+    args = sys.argv[1:]
+    owner_uid = None
+    if "--owner" in args:
+        i = args.index("--owner")
+        owner_uid = args[i + 1]
+        del args[i:i + 2]
+    cid = args[0]
+    base = (args[1] if len(args) > 1 else DEFAULT_URL).rstrip("/")
 
     from playwright.sync_api import sync_playwright
 
-    a_id = "u_owner_" + uuid.uuid4().hex[:6]
+    a_id = owner_uid or ("u_owner_" + uuid.uuid4().hex[:6])
     b_id = "u_mate_" + uuid.uuid4().hex[:6]
     bad: list[str] = []
 
@@ -71,8 +103,12 @@ def main() -> int:
         browser = pw.chromium.launch()
 
         # --- the owner ------------------------------------------------------------
-        ctx_a, a = open_as(browser, base, a_id, f"{base}/app?id={cid}")
+        ctx_a, a, a_id = open_as(browser, base, a_id, f"{base}/app?id={cid}")
         a.on("pageerror", lambda e: bad.append(f"owner pageerror: {e}"))
+        # Pass --owner <uid> to sign in as the account that actually created the
+        # challenge; otherwise this identity joins like anyone else with the link.
+        if take_the_invite(a):
+            _p("owner  : joined via the invite (not the original creator)")
         sa = snapshot(a)
         _p(f"owner  : {sa}")
         if not sa["nodes"]:
@@ -91,8 +127,16 @@ def main() -> int:
             bad.append(f"Invite copied {link!r}, which does not carry the challenge id")
 
         # --- the teammate ---------------------------------------------------------
-        ctx_b, b = open_as(browser, base, b_id, link or f"{base}/app?id={cid}")
+        ctx_b, b, b_id = open_as(browser, base, b_id, link or f"{base}/app?id={cid}")
         b.on("pageerror", lambda e: bad.append(f"teammate pageerror: {e}"))
+        # The invite must lead somewhere. If no join is offered and no map appears,
+        # the link is a dead end -- which is the failure this whole check exists for.
+        before = snapshot(b)
+        joined = take_the_invite(b)
+        _p(f"mate   : {'joined via the invite button' if joined else 'already a member'}")
+        if not joined and not before["nodes"]:
+            bad.append("the invite link offered no way in and showed no map: "
+                       "a teammate arrives at a dead end")
         sb = snapshot(b)
         _p(f"mate   : {sb}")
 
