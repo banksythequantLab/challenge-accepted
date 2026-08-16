@@ -195,22 +195,35 @@ def main() -> None:
         else:
             failures.append("no tool to open -- the seed did not attach one")
 
-        # --- 3. contrast --------------------------------------------------------
+        # --- 3. contrast, in BOTH themes ----------------------------------------
+        #
+        # A light theme is where contrast quietly dies: the same #FFC24B that reads
+        # fine on near-black is 1.7:1 on white. Measuring only the theme you happen to
+        # be looking at means shipping the other one blind.
         page.click('.tab[data-p="chat"]')
         page.wait_for_timeout(300)
-        rows = page.evaluate(CONTRAST_JS,
-                             ".msg .body, .who, .stat span, .stat b, .legend span, "
-                             ".roster, .facts li, .entry, .lane .what, #title, .crit")
-        worst = sorted({(r["what"], r["ratio"], r["large"], str(r["sel"]))
-                        for r in rows}, key=lambda r: r[1])[:8]
-        _p("\nlowest contrast:")
-        for what, ratio, large, sel in worst:
-            need = AA_LARGE if large else AA_BODY
-            flag = "  <-- below AA" if ratio < need else ""
-            _p(f"  {ratio:>5}:1  need {need}  {str(sel)[:22]:<22} {what!r}{flag}")
+        SELECTORS = (".msg .body, .who, .stat span, .stat b, .legend span, "
+                     ".roster, .facts li, .entry, .lane .what, #title, .crit, "
+                     ".kind, .tool .t, .byline, .gatecard p, .empty")
+        bad: list[tuple[str, float, str]] = []
+        shots = ROOT / "_walk"
+        shots.mkdir(exist_ok=True)
 
-        bad = [(w, r, s) for w, r, lg, s in worst if r < (AA_LARGE if lg else AA_BODY)]
-        page.screenshot(path=str(ROOT / "_a11y.png"))
+        for theme in ("dark", "light"):
+            page.evaluate("t => document.documentElement.dataset.theme = t", theme)
+            page.wait_for_timeout(400)
+            rows = page.evaluate(CONTRAST_JS, SELECTORS)
+            worst = sorted({(r["what"], r["ratio"], r["large"], str(r["sel"]))
+                            for r in rows}, key=lambda r: r[1])[:8]
+            _p(f"\nlowest contrast ({theme}):")
+            for what, ratio, large, sel in worst:
+                need = AA_LARGE if large else AA_BODY
+                flag = "  <-- below AA" if ratio < need else ""
+                _p(f"  {ratio:>5}:1  need {need}  {str(sel)[:22]:<22} {what!r}{flag}")
+            bad += [(f"[{theme}] {w}", r, s)
+                    for w, r, lg, s in worst if r < (AA_LARGE if lg else AA_BODY)]
+            page.screenshot(path=str(shots / f"a11y_{theme}.png"))
+
         browser.close()
 
     for what, ratio, sel in bad:
@@ -224,7 +237,8 @@ def main() -> None:
             _p(" * " + f)
         sys.exit(1)
 
-    _p("\nusable without a mouse, and readable. wrote _a11y.png")
+    _p("\nusable without a mouse, and readable in both themes. "
+       "wrote _walk/a11y_dark.png and _walk/a11y_light.png")
 
 
 if __name__ == "__main__":

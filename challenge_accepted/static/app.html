@@ -4,18 +4,95 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Challenge Accepted</title>
+<script>
+// Theme, applied BEFORE the first paint.
+//
+// This is why it is a blocking script in <head> rather than part of the main script
+// at the end of <body>: set the theme after paint and a light-mode user gets a
+// full-screen flash of near-black on every single load. Three lines here buy that.
+(function () {
+  var saved = null;
+  try { saved = localStorage.getItem('ca_theme'); } catch (e) {}
+  // No saved choice means follow the machine. Someone who has already chosen keeps
+  // their choice, even if the OS disagrees -- an explicit act outranks a default.
+  var light = saved ? saved === 'light'
+    : window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches;
+  document.documentElement.dataset.theme = light ? 'light' : 'dark';
+})();
+</script>
 <style>
+  /* ------------------------------------------------------------------------------
+     Two themes, one set of names.
+     Every colour in this file is a token. That is not tidiness for its own sake: a
+     light theme built by overriding "most" of the dark one leaves patches -- an SVG
+     card that stays near-black, a gold label that vanishes on white -- and patches are
+     what a judge notices. If you add a colour below, add it here first.
+     Contrast is checked, not eyeballed: scripts\check_a11y.py reads the RENDERED
+     colours and fails under 4.5:1, and it runs against both themes.
+     ------------------------------------------------------------------------------ */
   :root{
-    --bg:#0B0D12; --panel:#12151D; --panel2:#171B25; --line:#232838;
+    color-scheme:dark;
+    --bg:#0B0D12; --panel:#12151D; --panel2:#171B25; --line:#232838; --line-soft:#1A1E29;
     /* --faint was #5A6274, which measured 3.18:1 against the panels -- below WCAG AA's
        4.5:1 for body text, and it carries the stat labels, the map legend and the
        roster. Unreadable on a projector, which is exactly where a hackathon demo gets
-       seen. #828A9E measures 4.98-5.63:1 across all three backgrounds.
-       scripts\check_a11y.py computes this from the rendered colours, not the CSS. */
-    --ink:#EDEFF3; --dim:#8B93A7; --faint:#828A9E;
+       seen. #828A9E measures 4.98-5.63:1 across all three backgrounds. */
+    --ink:#EDEFF3; --dim:#8B93A7; --faint:#828A9E; --prose:#C3CAD8; --src:#C9D2E3;
     --todo:#6B7385; --active:#4C8DFF; --blocked:#FF5C5C; --done:#3DD68C;
     --gold:#FFC24B; --violet:#A78BFA;
     --glow:0 0 24px rgba(76,141,255,.35);
+
+    /* surfaces and washes */
+    --sheen:rgba(255,255,255,.03); --sheen2:rgba(255,255,255,.02);
+    --composer-bg:rgba(0,0,0,.25); --code-bg:rgba(255,255,255,.07);
+    --chip-bg:#1E2432; --xp-track:#1C2130; --scrim:rgba(6,8,12,.86);
+    --shadow:0 24px 80px rgba(0,0,0,.6);
+    --wash-a:rgba(76,141,255,.10); --wash-b:rgba(167,139,250,.09);
+    --wash-c:rgba(61,214,140,.06);
+
+    /* the quest map. Drawn as SVG, so these are applied through CSS classes rather
+       than baked into the markup the renderer emits. */
+    --node-fill:#12151D; --node-ink:#EDEFF3; --node-sub:#8B93A7; --edge:#2A3040;
+
+    /* your own chat bubble */
+    --me-a:#2A5BB8; --me-b:#3A6FD8; --me-ink:#EDEFF3; --me-line:#4C8DFF44;
+
+    /* journal kind chips */
+    --k-insight-bg:#0F2E1F; --k-insight:#7DE0AC;
+    --k-blocker-bg:#331416; --k-blocker:#FF8A8A;
+    --k-build-bg:#332708;   --k-build:#FFD27A;
+    --k-qa-bg:#122540;      --k-qa:#8FBBFF;
+    --err-ink:#FFC9C9;
+  }
+
+  /* Light. Not "dark with the lightness flipped": the accents are re-picked so they
+     still carry text on white. #FFC24B gold is 1.7:1 on white -- invisible -- so the
+     token that labels a Toolwright becomes a darker amber while the progress BAR that
+     uses the same idea stays bright. */
+  [data-theme="light"]{
+    color-scheme:light;
+    --bg:#F4F6FA; --panel:#FFFFFF; --panel2:#EFF2F8; --line:#D9DEE9; --line-soft:#E7EBF2;
+    --ink:#151922; --dim:#4C5568; --faint:#5D667A; --prose:#2C3444; --src:#243044;
+    --todo:#8A93A6; --active:#1B5FD0; --blocked:#C62828; --done:#0B7C48;
+    --gold:#8A5A00; --violet:#5B36C7;
+    --glow:0 0 0 3px rgba(27,95,208,.18);
+
+    --sheen:rgba(15,23,42,.03); --sheen2:rgba(15,23,42,.02);
+    --composer-bg:rgba(15,23,42,.04); --code-bg:rgba(15,23,42,.07);
+    --chip-bg:#E7EBF3; --xp-track:#E2E7F0; --scrim:rgba(20,26,38,.55);
+    --shadow:0 24px 60px rgba(20,26,38,.22);
+    --wash-a:rgba(76,141,255,.10); --wash-b:rgba(167,139,250,.10);
+    --wash-c:rgba(61,214,140,.08);
+
+    --node-fill:#FFFFFF; --node-ink:#151922; --node-sub:#5D667A; --edge:#C3CBDA;
+
+    --me-a:#1B5FD0; --me-b:#2E77E8; --me-ink:#FFFFFF; --me-line:#1B5FD055;
+
+    --k-insight-bg:#DDF5E8; --k-insight:#0B6B3F;
+    --k-blocker-bg:#FBE2E2; --k-blocker:#A81E1E;
+    --k-build-bg:#FBEED0;   --k-build:#7A5400;
+    --k-qa-bg:#DEEAFB;      --k-qa:#12489E;
+    --err-ink:#8E1F1F;
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
@@ -23,18 +100,23 @@
     overflow:hidden}
   body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:0;
     background:
-      radial-gradient(900px 500px at 12% -10%, rgba(76,141,255,.10), transparent 60%),
-      radial-gradient(800px 480px at 92% 6%, rgba(167,139,250,.09), transparent 62%),
-      radial-gradient(700px 500px at 60% 110%, rgba(61,214,140,.06), transparent 60%)}
+      radial-gradient(900px 500px at 12% -10%, var(--wash-a), transparent 60%),
+      radial-gradient(800px 480px at 92% 6%, var(--wash-b), transparent 62%),
+      radial-gradient(700px 500px at 60% 110%, var(--wash-c), transparent 60%)}
   #app{position:relative;z-index:1;display:grid;grid-template-columns:1fr 420px;
     grid-template-rows:auto 1fr;height:100%}
 
   header{grid-column:1/-1;padding:12px 20px;border-bottom:1px solid var(--line);
     display:flex;align-items:center;gap:14px;flex-wrap:wrap;
-    background:linear-gradient(180deg,rgba(255,255,255,.03),transparent)}
+    background:linear-gradient(180deg,var(--sheen),transparent)}
+  /* The wordmark keeps its own gradient in both themes -- it is the logo, not text
+     that has to be read at 4.5:1. Darkened a shade for light so it is not a pastel
+     smear on white. */
   .logo{font-size:16px;font-weight:800;letter-spacing:.3px;
     background:linear-gradient(92deg,#7FB2FF,#A78BFA 55%,#FFC24B);
     -webkit-background-clip:text;background-clip:text;color:transparent;white-space:nowrap}
+  [data-theme="light"] .logo{background:linear-gradient(92deg,#1B5FD0,#5B36C7 55%,#8A5A00);
+    -webkit-background-clip:text;background-clip:text}
   #title{font-size:14px;font-weight:650;color:var(--ink);
     max-width:44ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   #title.empty{color:var(--faint);font-weight:400;font-style:italic}
@@ -45,7 +127,7 @@
   .stat b{display:block;font-size:15px;font-weight:700}
   .stat span{font-size:9.5px;letter-spacing:.9px;text-transform:uppercase;color:var(--faint)}
   .xpwrap{width:150px}
-  .xpbar{height:7px;border-radius:99px;background:#1C2130;overflow:hidden;margin-top:5px;
+  .xpbar{height:7px;border-radius:99px;background:var(--xp-track);overflow:hidden;margin-top:5px;
     border:1px solid var(--line)}
   .xpfill{height:100%;width:0;border-radius:99px;transition:width .6s cubic-bezier(.2,.8,.2,1);
     background:linear-gradient(90deg,#3DD68C,#7FB2FF)}
@@ -59,7 +141,7 @@
   .dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:5px}
 
   aside{border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0;
-    background:linear-gradient(180deg,rgba(255,255,255,.02),transparent)}
+    background:linear-gradient(180deg,var(--sheen2),transparent)}
   /* THE GRID MIN-CONTENT TRAP, and the reason the tab row hung off a 320px screen.
      A grid item's default `min-width` is `auto`, meaning "never shrink below my
      content". The quest map is a 1980px SVG, so on a 320px phone the column refused
@@ -92,8 +174,8 @@
   .msg{max-width:94%;padding:9px 12px;border-radius:12px;font-size:13px;white-space:pre-wrap;
     word-wrap:break-word;animation:rise .25s ease}
   @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-  .msg.me{align-self:flex-end;background:linear-gradient(135deg,#2A5BB8,#3A6FD8);
-    border:1px solid #4C8DFF44}
+  .msg.me{align-self:flex-end;background:linear-gradient(135deg,var(--me-a),var(--me-b));
+    color:var(--me-ink);border:1px solid var(--me-line)}
   .msg.bot{align-self:flex-start;background:var(--panel2);border:1px solid var(--line)}
   .msg .who{font-size:9.5px;letter-spacing:.9px;text-transform:uppercase;
     color:var(--dim);margin-bottom:3px;font-weight:700}
@@ -101,7 +183,7 @@
     text-transform:uppercase;color:var(--violet)}
   .msg .body b.h:first-child{margin-top:0}
   .msg .body code{font-family:ui-monospace,Consolas,monospace;font-size:11.5px;
-    background:rgba(255,255,255,.07);border-radius:4px;padding:1px 5px}
+    background:var(--code-bg);border-radius:4px;padding:1px 5px}
   .msg.act{align-self:flex-start;background:transparent;border:1px dashed var(--line);
     color:var(--dim);font-size:11.5px;padding:6px 10px;font-family:ui-monospace,Consolas,monospace}
   .typing{display:inline-flex;gap:4px}
@@ -111,7 +193,7 @@
   @keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
 
   .composer{flex:none;border-top:1px solid var(--line);padding:12px;
-    display:flex;gap:8px;align-items:flex-end;background:rgba(0,0,0,.25)}
+    display:flex;gap:8px;align-items:flex-end;background:var(--composer-bg)}
   textarea{flex:1;resize:none;background:var(--panel2);color:var(--ink);
     border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;
     font-size:13px;max-height:120px;min-height:42px}
@@ -119,20 +201,25 @@
   button{background:var(--panel2);color:var(--ink);border:1px solid var(--line);
     border-radius:10px;padding:10px 14px;font-size:13px;font-weight:600;cursor:pointer;
     transition:.15s}
-  button:hover:not(:disabled){border-color:var(--active);color:#fff}
+  button:hover:not(:disabled){border-color:var(--active);color:var(--active)}
   button:disabled{opacity:.45;cursor:not-allowed}
-  .send{background:linear-gradient(135deg,#3A6FD8,#4C8DFF);border-color:#4C8DFF66}
+  /* The primary action keeps a solid blue and white text in BOTH themes: it is the
+     one control that has to be unmistakable, and inverting it on light would make it
+     the palest thing on the screen. */
+  .send{background:linear-gradient(135deg,var(--me-a),var(--me-b));color:#fff;
+    border-color:var(--me-line)}
+  .send:hover:not(:disabled){color:#fff}
 
   #journal{flex:1;overflow-y:auto;padding:12px 16px}
-  .entry{padding:8px 0;border-bottom:1px solid #1A1E29;font-size:12.5px}
+  .entry{padding:8px 0;border-bottom:1px solid var(--line-soft);font-size:12.5px}
   .entry:last-child{border-bottom:0}
   .who2{font-weight:700;font-size:11px}
   .kind{font-size:9px;text-transform:uppercase;letter-spacing:.8px;padding:2px 7px;
-    border-radius:99px;margin-left:6px;background:#1E2432;color:var(--dim)}
-  .kind.insight{background:#0F2E1F;color:#7DE0AC}
-  .kind.blocker{background:#331416;color:#FF8A8A}
-  .kind.build{background:#332708;color:#FFD27A}
-  .kind.question,.kind.answer{background:#122540;color:#8FBBFF}
+    border-radius:99px;margin-left:6px;background:var(--chip-bg);color:var(--dim)}
+  .kind.insight{background:var(--k-insight-bg);color:var(--k-insight)}
+  .kind.blocker{background:var(--k-blocker-bg);color:var(--k-blocker)}
+  .kind.build{background:var(--k-build-bg);color:var(--k-build)}
+  .kind.question,.kind.answer{background:var(--k-qa-bg);color:var(--k-qa)}
   /* The parallel-build rail. Hidden until a worker speaks, so it never sits empty. */
   #forge{display:none}
   #forge.on{display:grid;gap:5px;padding:10px 14px;border-bottom:1px solid var(--line);
@@ -155,7 +242,7 @@
 
   /* A failed run is not a status code. It needs to say what happened, whether any of
      it stuck, and offer the way forward. */
-  .msg.act.err{border-color:var(--blocked);border-style:solid;color:#FFC9C9;
+  .msg.act.err{border-color:var(--blocked);border-style:solid;color:var(--err-ink);
     max-width:100%;font-family:inherit;font-size:12.5px;padding:10px 12px}
   .msg.act.err .wait{display:block;color:var(--dim);margin:6px 0 9px;font-size:11.5px}
   .msg.act.err button{font-size:12px}
@@ -172,12 +259,12 @@
   .roster{font-size:11.5px;color:var(--dim);line-height:1.4;flex:1}
   .roster b{color:var(--ink)}
   .facts{margin:0;padding:12px 16px 12px 30px}
-  .facts li{margin:6px 0;font-size:12.5px;color:#C3CAD8}
+  .facts li{margin:6px 0;font-size:12.5px;color:var(--prose)}
 
   .quest{border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin:10px 16px;
     background:var(--panel2)}
   .quest h3{margin:0 0 4px;font-size:14px}
-  .crit{color:#C3CAD8;font-size:12.5px;margin:8px 0}
+  .crit{color:var(--prose);font-size:12.5px;margin:8px 0}
   .tool{border:1px solid var(--line);border-radius:9px;padding:9px 11px;margin:8px 0;
     background:rgba(255,194,75,.05);font-size:12.5px}
   .tool .t{font-size:9.5px;color:var(--gold);text-transform:uppercase;letter-spacing:.9px;
@@ -225,13 +312,32 @@
     font-size:11.5px;padding:7px 11px}
   .claude{background:linear-gradient(135deg,#7A4B2A,#C1683A);border-color:#C1683A88;color:#fff}
 
+  /* The quest map's own palette. The node STATUS colours (todo/ready/done/blocked)
+     still come from the server, because they mean something and mean the same thing
+     in both themes; everything structural around them is a token. */
   .node{cursor:pointer}
+  .node rect.card{fill:var(--node-fill)}
+  .node .n-title{fill:var(--node-ink)}
+  .node .n-sub{fill:var(--node-sub)}
+  .edge{stroke:var(--edge)}
+  .arrow{fill:var(--edge)}
+  .badge-dot{fill:var(--gold)}
+  /* The count sits ON the gold dot, so it is dark in both themes -- inverting it with
+     the rest of the UI would put white on amber at 1.9:1. */
+  .badge-num{fill:#1A1A1A}
+  [data-theme="light"] .badge-dot{fill:#FFC24B}
+  .ready{stroke:var(--active)}
+  .tick{fill:var(--done)}
   /* A focus ring you can actually see on a dark map. `outline` does not render
      reliably on an SVG <g> across browsers, so draw it. */
   .node:focus{outline:none}
   .node:focus rect.card{stroke:var(--gold);stroke-width:3;filter:brightness(1.3)}
   .node rect.card{transition:filter .15s}
   .node:hover rect.card{filter:brightness(1.4)}
+  /* Brightening a white card does nothing, so on light the same gesture darkens. Left
+     as-is, hover on the map simply stopped existing in one of the two themes. */
+  [data-theme="light"] .node:hover rect.card{filter:brightness(.93)}
+  [data-theme="light"] .node:focus rect.card{filter:brightness(.95)}
   .node.sel rect.card{stroke-width:2.5}
   .ready{animation:pulse 2.6s ease-in-out infinite}
   @keyframes pulse{0%,100%{opacity:.3}50%{opacity:.9}}
@@ -239,24 +345,22 @@
   /* The sign-in gate. z-index above the tool sheet: if both were ever open at once the
    one that decides whether you may see anything has to win. */
 #gate{position:fixed;inset:0;z-index:60;display:flex;align-items:center;
-  justify-content:center;background:rgba(6,8,12,.92);padding:20px}
+  justify-content:center;background:var(--scrim);padding:20px}
 #gate[hidden]{display:none}
-.gatecard{max-width:380px;width:100%;text-align:center;background:var(--panel,#12151D);
-  border:1px solid #2A3040;border-radius:16px;padding:28px 24px}
-.gatecard h2{margin:0 0 10px;font-size:15px;letter-spacing:2px;
-  background:linear-gradient(90deg,#4C8DFF,#B478FF);-webkit-background-clip:text;
-  background-clip:text;color:transparent}
-.gatecard p{margin:0 0 18px;font-size:12.5px;line-height:1.6;color:#8B93A7}
+.gatecard{max-width:380px;width:100%;text-align:center;background:var(--panel);
+  border:1px solid var(--line);border-radius:16px;padding:28px 24px;box-shadow:var(--shadow)}
+.gatecard h2{margin:0 0 10px;font-size:15px;letter-spacing:2px;color:var(--ink)}
+.gatecard p{margin:0 0 18px;font-size:12.5px;line-height:1.6;color:var(--dim)}
 .gatecard button{width:100%;min-height:44px;font-size:13px}
-.gate-err{color:#EA4335;margin:14px 0 0;font-size:12px}
+.gate-err{color:var(--blocked);margin:14px 0 0;font-size:12px}
 /* Roster avatars. 18px so a party of five still fits on one line on a phone. */
 .face{width:18px;height:18px;border-radius:50%;vertical-align:-4px;margin-right:4px}
-#modal{position:fixed;inset:0;z-index:50;display:none;background:rgba(6,8,12,.78);
+#modal{position:fixed;inset:0;z-index:50;display:none;background:var(--scrim);
     backdrop-filter:blur(3px);padding:32px}
   #modal.on{display:flex;align-items:center;justify-content:center}
   .sheet{background:var(--panel);border:1px solid var(--line);border-radius:16px;
     width:min(1000px,100%);max-height:100%;display:flex;flex-direction:column;
-    box-shadow:0 24px 80px rgba(0,0,0,.6);animation:rise .2s ease}
+    box-shadow:var(--shadow);animation:rise .2s ease}
   .sheet header{display:flex;align-items:center;gap:12px;padding:16px 20px;
     border-bottom:1px solid var(--line);flex:none;background:none}
   .sheet h2{margin:0;font-size:16px;font-weight:700}
@@ -267,7 +371,7 @@
     border-color:rgba(255,92,92,.35)}
   .badge.ok{background:rgba(61,214,140,.12);color:var(--done);
     border-color:rgba(61,214,140,.35)}
-  .sheet .usage{padding:14px 20px;color:#C3CAD8;font-size:13px;line-height:1.6;
+  .sheet .usage{padding:14px 20px;color:var(--prose);font-size:13px;line-height:1.6;
     border-bottom:1px solid var(--line);flex:none}
   .sheet .stage{flex:1;min-height:0;overflow:auto;padding:0}
   .sheet footer{display:flex;gap:8px;padding:12px 20px;border-top:1px solid var(--line);
@@ -276,11 +380,11 @@
   #frame{width:100%;height:min(60vh,540px);border:0;background:#fff;display:block}
   pre.src{margin:0;padding:18px 20px;font-family:ui-monospace,Consolas,monospace;
     font-size:12.5px;line-height:1.65;white-space:pre-wrap;word-break:break-word;
-    color:#C9D2E3}
+    color:var(--src)}
   .check{display:flex;gap:11px;align-items:flex-start;padding:11px 20px;
-    border-bottom:1px solid #1A1E29;cursor:pointer;font-size:13.5px}
+    border-bottom:1px solid var(--line-soft);cursor:pointer;font-size:13.5px}
   .check:last-child{border-bottom:0}
-  .check input{margin:2px 0 0;width:16px;height:16px;accent-color:#3DD68C;flex:none}
+  .check input{margin:2px 0 0;width:16px;height:16px;accent-color:var(--done);flex:none}
   .check.done span{text-decoration:line-through;color:var(--faint)}
   .check .note{display:block;font-size:12px;color:var(--dim);margin-top:3px}
   .sheet .empty{padding:28px 20px}
@@ -330,6 +434,8 @@
       <div class="stat"><b id="c-tools">0</b><span>tools forged</span></div>
       <div class="stat"><b id="c-party">1</b><span>in party</span></div>
       <div class="stat"><b id="live">●</b><span>live</span></div>
+      <button class="ghost" id="theme" type="button" aria-pressed="false"
+              title="Switch between dark and light">Light</button>
       <!-- Who the SERVER thinks you are, in the header, on every screen. The whole
            point of adding auth is that this stops being a guess. -->
       <div class="stat" id="who" hidden>
@@ -907,21 +1013,24 @@ function drawGraph(g) {
 
   const edges = g.edges.map(e => {
     const a = pos[e.source], b = pos[e.target];
-    return (a && b) ? `<path d="${edgePath(a,b)}" fill="none" stroke="#2A3040"
+    // Classes, not literals. SVG presentation attributes are the lowest-priority
+    // source of a value, so a CSS rule wins -- which is what lets the map follow the
+    // theme without the renderer knowing a theme exists.
+    return (a && b) ? `<path class="edge" d="${edgePath(a,b)}" fill="none"
       stroke-width="1.7" marker-end="url(#ar)"/>` : '';
   }).join('');
 
   const nodes = g.nodes.map(n => {
     const d = n.data, sel = n.id === selected ? ' sel' : '';
     const label = d.label.length > 28 ? d.label.slice(0, 27) + '…' : d.label;
-    const badge = d.tools.length ? `<g>
-        <circle cx="212" cy="16" r="9" fill="#FFC24B"/>
-        <text x="212" y="20" text-anchor="middle" font-size="10.5" font-weight="800"
-              fill="#1A1A1A">${d.tools.length}</text></g>` : '';
+    const badge = d.tools.length ? `<g class="badge-g">
+        <circle class="badge-dot" cx="212" cy="16" r="9"/>
+        <text class="badge-num" x="212" y="20" text-anchor="middle" font-size="10.5"
+              font-weight="800">${d.tools.length}</text></g>` : '';
     const ring = d.ready ? `<rect class="ready" x="-4" y="-4" width="238" height="76"
-        rx="14" fill="none" stroke="#4C8DFF" stroke-width="2.5"/>` : '';
+        rx="14" fill="none" stroke-width="2.5"/>` : '';
     const check = d.status === 'done'
-      ? `<text x="206" y="52" font-size="15" fill="#3DD68C">✔</text>` : '';
+      ? `<text class="tick" x="206" y="52" font-size="15">✔</text>` : '';
     // tabindex + role + aria-label, because an SVG <g> with a click handler is
     // invisible to the keyboard and announced as nothing. The quest map is the
     // centrepiece of this product; a mouse-only centrepiece is a mouse-only product.
@@ -934,11 +1043,11 @@ function drawGraph(g) {
               data-id="${esc(n.id)}" tabindex="0" role="button"
               aria-label="${esc(say)}">
         ${ring}
-        <rect class="card" width="230" height="68" rx="12" fill="#12151D"
+        <rect class="card" width="230" height="68" rx="12"
               stroke="${d.color}" stroke-width="1.6"/>
         <rect width="4" height="68" rx="2" fill="${d.color}"/>
-        <text x="16" y="27" font-size="13" font-weight="650" fill="#EDEFF3">${esc(label)}</text>
-        <text x="16" y="47" font-size="10.5" fill="#8B93A7">${esc(d.status)}${
+        <text class="n-title" x="16" y="27" font-size="13" font-weight="650">${esc(label)}</text>
+        <text class="n-sub" x="16" y="47" font-size="10.5">${esc(d.status)}${
           d.effort_mins ? ' · ' + d.effort_mins + ' min' : ''}</text>
         ${badge}${check}
       </g>`;
@@ -946,7 +1055,7 @@ function drawGraph(g) {
 
   $('graph').innerHTML = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
     <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6"
-      markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#2A3040"/></marker>
+      markerHeight="6" orient="auto"><path class="arrow" d="M0,0 L10,5 L0,10 z"/></marker>
     </defs>${edges}${nodes}</svg>`;
 
   const open = el => {
@@ -1572,6 +1681,27 @@ async function startAuth() {
     });
   });
 }
+
+// --- theme ------------------------------------------------------------------------
+//: The <head> script already picked one; this only wires the button and remembers a
+//: deliberate choice. The map redraws because its colours live in CSS -- but the SVG
+//: is only rebuilt on the next poll, and `filter` transitions on a stale tree look
+//: like a glitch, so nudge it.
+function applyTheme(name) {
+  document.documentElement.dataset.theme = name;
+  try { localStorage.setItem('ca_theme', name); } catch (e) {}
+  const light = name === 'light';
+  // The label is the DESTINATION, not the current state, and it is a word rather than
+  // a glyph: ☀ and 🌙 render as anything from a starburst to a tofu box depending on
+  // the font, and a control whose meaning depends on font fallback is not a control.
+  $('theme').textContent = light ? 'Dark' : 'Light';
+  $('theme').setAttribute('aria-pressed', String(light));
+  $('theme').title = light ? 'Switch to dark' : 'Switch to light';
+  $('theme').setAttribute('aria-label', $('theme').title);
+}
+applyTheme(document.documentElement.dataset.theme || 'dark');
+$('theme').onclick = () =>
+  applyTheme(document.documentElement.dataset.theme === 'light' ? 'dark' : 'light');
 
 $('signout').onclick = async () => {
   await auth.signOut();
