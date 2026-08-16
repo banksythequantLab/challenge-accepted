@@ -213,6 +213,22 @@ don't call a model — which is the actual lesson.
   rather than printing "Deployed" over it. Three subsystems, found three different ways:
   reading the diff, reading the vendor's source, reading a crash log.
 
+- **The same bug came back, because the fix was on the wrong agent.** The Vertex
+  `id`-on-code-parts crash returned weeks later, this time attributed to `warden` and
+  only ever at the *end* of a FORGE turn. The guard was on the Toolwrights — the agents
+  that execute code — which felt obviously right and was wrong. ADK segregates history
+  per agent by comparing branch paths, and `_is_event_belongs_to_branch` opens with
+  `if not invocation_branch or not event.branch: return True`. **The root agent has no
+  branch.** So Warden does not get a filtered view of the conversation; it gets
+  everything, including four Toolwrights' `executableCode` events from deep inside
+  FORGE, each carrying an `id` Vertex refuses. The next time Warden spoke after a
+  build, its own request contained them. Intermittent, invisible from the UI, and
+  costly: one recorded run built a single tool where the run before it built seven.
+  The traceback was what settled it — `runners.py:610 _drive_root_node` →
+  `_llm_agent_wrapper.run_llm_agent_as_node`, which is the *root* being driven, not a
+  worker. The guard now installs itself across the whole agent tree and the install
+  count is asserted, because a silent no-op there restores the bug exactly.
+
 - **A workaround for a problem the framework had already solved, which took the site
   down.** To check that `/run_sse` was not being run as somebody else, the auth gate has
   to read the request body. Assuming that consuming it would starve the route
@@ -276,7 +292,7 @@ don't call a model — which is the actual lesson.
   near-black on a white page. `check_theme.py` reads the *rendered* luminance of every
   painted surface and fails if one stayed dark; `check_a11y.py` runs contrast in both
   themes (worst: 5.60:1 dark, 4.86:1 light, against a 4.5:1 floor).
-- **153 tests plus a live-check suite that signs in**, including a regression test for
+- **161 tests plus a live-check suite that signs in**, including a regression test for
   every bug above. The checks click the actual controls and read the clipboard, the
   iframe and the resulting prompt string back — `check_feedback.py` follows a
   thumbs-down all the way into the Quartermaster's instruction, because "the loop is
