@@ -12,6 +12,7 @@ from . import config, prompts
 from .services.memory import preload_memory
 from .services.store import store
 from .services.tools import read_challenge_state, remember_group_fact, write_journal
+from . import vertex_compat
 from .sub_agents import archivist, cartographer, coach, forge, interviewer
 from .sub_agents.scout import scout_tool
 
@@ -77,5 +78,13 @@ root_agent = LlmAgent(
     tools=[scout_tool, read_challenge_state, write_journal, remember_group_fact,
            preload_memory],
 )
+
+#: Vertex rejects the `id` on code parts, and the ROOT agent is the one that trips it:
+#: it runs unbranched, so ADK's per-agent history filter lets it see the Toolwrights'
+#: `executableCode` events from inside FORGE. Attaching the guard to the whole tree is
+#: what makes that safe -- see vertex_compat for the traceback that proved it.
+#: Asserted, not assumed: a silent no-op here restores the bug exactly.
+_GUARDED = vertex_compat.install(root_agent)
+assert _GUARDED >= 6, f"the Vertex id guard reached only {_GUARDED} agents"
 
 __all__ = ["root_agent", "warden_instruction"]
