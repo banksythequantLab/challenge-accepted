@@ -17,12 +17,15 @@ python scripts\seed_demo.py        # instant populated graph, no API cost
 python main.py                     # http://localhost:8080/app
 ```
 
-- **Two browser windows**, side by side, as two different users. There is no sign-in --
-  identity is an anonymous id in `localStorage` -- so use **one normal window and one
-  incognito window**, or two browser profiles. Do NOT use two tabs — they share
-  `localStorage`, so both would be the same user and the party would never reach 2.
+- **Two browser windows**, side by side, as two different users. Identity is a **Google
+  account** now, so this needs **two real accounts** — one normal window and one
+  incognito window, or two browser profiles. Do NOT use two tabs: they share a signed-in
+  session, so both would be the same person and the party would never reach 2. Sign both
+  in *before* you record; the Google popup is not something you want on camera.
   Get the second window's URL from the **Invite** button rather than typing it; that is
-  the path a real teammate takes, and it is the one that is tested.
+  the path a real teammate takes, and it is the one that is tested. The invite link is
+  now *sign in → join → see*, so the second window shows a **Join** step before the map
+  appears — that beat is the product working, not a snag. Say so out loud.
 - **min-instances=1** on Cloud Run if demoing the deployed URL. A cold start is several
   seconds of dead air.
 - **Pre-run the challenge once** so the tools already exist. Then re-run the FORGE beat

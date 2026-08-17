@@ -20,17 +20,46 @@ What it asserts, in the order a judge would see it:
     python scripts\\check_party_live.py https://challengeaccepted.app
 
 Exit 0 only if a stranger inherits the party's knowledge on the deployed service.
+
+**Both people sign in now.** When Google Sign-In shipped this check went to 401 and
+stopped running against production entirely, which is the same hole it was written to
+close -- a claim on the front page with nothing measuring it. Dana also has to *join*
+before she can read the challenge, because possession of an id is no longer enough.
+That is not a workaround bolted on for the test: it is the POST the browser makes on
+load, so the check drives the real path a teammate takes.
 """
 
 from __future__ import annotations
 
 import json
 import sys
+import time
+import urllib.error
 import urllib.request
 import uuid
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 APP = "challenge_accepted"
 DEFAULT_URL = "https://challengeaccepted.app"
+
+#: uid -> (minted_at, id_token). Two identities here, and a run is long enough that a
+#: token minted at the top can expire before the last assertion.
+_AUTH = False
+_TOKENS: dict[str, tuple[float, str]] = {}
+
+
+def _headers(user: str | None) -> dict[str, str]:
+    if not _AUTH or not user:
+        return {}
+    minted, token = _TOKENS.get(user, (0.0, ""))
+    if not token or time.time() - minted > 1800:
+        from testauth import mint
+
+        token = mint(user)
+        _TOKENS[user] = (time.time(), token)
+    return {"Authorization": "Bearer " + token}
 
 #: Distinctive enough that a model inventing plausible filler cannot land on it, and
 #: phrased as something only a person doing the work would find out.
@@ -48,23 +77,38 @@ DEREK_TURNS = [
 DANA_ASKS = "I just joined. What should I pick up, and what do I need to know?"
 
 
-def _post(base, path, body, timeout=600):
+def _fail(code, path, detail):
+    raise SystemExit(
+        f"\n{code} on {path}\n{detail[:200]}\n"
+        "This is the CHECK being refused, not the party beat failing. An auth error "
+        "here would otherwise read as a product bug, which is the mistake this file "
+        "has already made three times about its own assertions.")
+
+
+def _post(base, path, body, timeout=600, user=None):
     req = urllib.request.Request(
         base.rstrip("/") + path, data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return r.read().decode("utf-8", "replace")
+        headers={"Content-Type": "application/json", **_headers(user)}, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        _fail(e.code, path, e.read().decode("utf-8", "replace"))
 
 
-def _get(base, path, timeout=90):
-    with urllib.request.urlopen(base.rstrip("/") + path, timeout=timeout) as r:
-        return json.load(r)
+def _get(base, path, timeout=90, user=None):
+    req = urllib.request.Request(base.rstrip("/") + path, headers=_headers(user))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.load(r)
+    except urllib.error.HTTPError as e:
+        _fail(e.code, path, e.read().decode("utf-8", "replace"))
 
 
 def _session(base, user, state):
     sid = "s_" + uuid.uuid4().hex[:10]
     _post(base, f"/apps/{APP}/users/{user}/sessions",
-          {"session_id": sid, "state": state}, timeout=90)
+          {"session_id": sid, "state": state}, timeout=90, user=user)
     return sid
 
 
@@ -74,7 +118,7 @@ def _say(base, user, sid, text):
         "app_name": APP, "user_id": user, "session_id": sid,
         "new_message": {"role": "user", "parts": [{"text": text}]},
         "streaming": False,
-    })
+    }, user=user)
     said, calls = [], []
     for line in raw.splitlines():
         if not line.startswith("data:"):
@@ -92,13 +136,27 @@ def _say(base, user, sid, text):
 
 
 def main(base: str) -> int:
+    global _AUTH
     base = base.rstrip("/")
-    derek = f"derek_{uuid.uuid4().hex[:8]}"
-    dana = f"dana_{uuid.uuid4().hex[:8]}"
 
     health = _get(base, "/api/healthz")
+    _AUTH = health.get("auth") == "required"
+    # The uid IS the path user -- authgate.py refuses any request whose stated user
+    # disagrees with the verified token, so these cannot be pretty names bolted onto a
+    # borrowed identity. Two distinct signed-in people is the whole point of the check.
+    if _AUTH:
+        from testauth import PREFIX
+
+        derek = f"{PREFIX}derek_{uuid.uuid4().hex[:6]}"
+        dana = f"{PREFIX}dana_{uuid.uuid4().hex[:6]}"
+        _headers(derek), _headers(dana)  # mint now; fail on credentials, not mid-run
+    else:
+        derek = f"derek_{uuid.uuid4().hex[:8]}"
+        dana = f"dana_{uuid.uuid4().hex[:8]}"
+
     print(f"target : {base}")
-    print(f"health : store={health.get('store')} memory={health.get('memory')}")
+    print(f"health : store={health.get('store')} memory={health.get('memory')} "
+          f"auth={health.get('auth')}")
     print(f"derek  : {derek}\ndana   : {dana}\n")
 
     # --- Derek opens the challenge and tells the agents something real -----------
@@ -109,14 +167,15 @@ def main(base: str) -> int:
         said, _ = _say(base, derek, d_sid, text)
         print(f"    ...{len(said)} chars")
 
-    state = _get(base, f"/apps/{APP}/users/{derek}/sessions/{d_sid}").get("state") or {}
+    state = _get(base, f"/apps/{APP}/users/{derek}/sessions/{d_sid}",
+                 user=derek).get("state") or {}
     cid, gid = state.get("challenge_id"), state.get("group_id")
     print(f"\nchallenge : {cid}\ngroup     : {gid}")
     if not cid:
         print("\nFAIL: Derek never got a challenge, so there is no party to join.")
         return 1
 
-    dash = _get(base, f"/api/challenges/{cid}/dashboard")
+    dash = _get(base, f"/api/challenges/{cid}/dashboard", user=derek)
     summary = dash.get("summary") or {}
     facts = summary.get("group_facts") or []
     charter = summary.get("charter") or {}
@@ -163,6 +222,17 @@ def main(base: str) -> int:
     # testing our own fixture instead of the product.
     print("\n--- dana (new user, invite link only) ---")
     a_sid = _session(base, dana, {"user_id": dana, "challenge_id": cid})
+
+    # Joining is a deliberate POST, exactly the one app.html makes on load. Under auth
+    # it is also load-bearing: possession of the id no longer buys you the challenge,
+    # so without this every read below would be a 403. Note what is NOT sent -- no
+    # group id. The server works the party out from the challenge, or the invite link
+    # would have to carry a secret the user could not have.
+    if _AUTH:
+        joined = json.loads(_post(base, f"/api/challenges/{cid}/join",
+                                  {"user_id": dana}, user=dana))
+        print(f"    joined -> {joined.get('group_id')}")
+
     said, calls = _say(base, dana, a_sid, DANA_ASKS)
     print(f">>> {DANA_ASKS}")
     print(f"    tool calls: {calls}\n")
@@ -171,7 +241,10 @@ def main(base: str) -> int:
     # Re-read the graph AFTER her turn. The Cartographer can still be drawing when
     # Derek's request returns, and a check that reads too early reports zero nodes and
     # then cannot evaluate its own assertion.
-    open_nodes = _open((_get(base, f"/api/challenges/{cid}/dashboard")
+    # Read it as DANA, not as Derek. Under auth this doubles as the proof that joining
+    # actually bought her something: if the membership wall were wrong in either
+    # direction it shows up here as a 403 or as a stranger reading a private plan.
+    open_nodes = _open((_get(base, f"/api/challenges/{cid}/dashboard", user=dana)
                         .get("graph") or {}).get("nodes") or [])
 
     low = said.lower()
@@ -216,14 +289,25 @@ def main(base: str) -> int:
         failures.append("Dana was not pointed at any open node by name")
 
     # 3. Did her arrival fork the party into a private group of one?
-    solo = _get(base, f"/api/challenges?group_id=grp_{dana}&limit=5")
-    solo = solo if isinstance(solo, list) else solo.get("challenges", [])
-    print(f"dana's own group: {len(solo)} challenge(s)  <- must be 0")
-    if solo:
-        failures.append(f"Dana was forked into her own group with {len(solo)} challenge(s)")
+    #
+    # With auth on, `group_id` is ignored -- the list is whatever the CALLER may see,
+    # which is the stronger question anyway. Dana must see Derek's challenge (she
+    # joined it) and nothing else: a second row means her arrival minted a private
+    # copy, which is the fork this assertion has always been about. Counting rows and
+    # demanding zero would now fail on the check working correctly.
+    hers = _get(base, f"/api/challenges?group_id=grp_{dana}&limit=5", user=dana)
+    hers = hers if isinstance(hers, list) else hers.get("challenges", [])
+    forked = [c for c in hers if c.get("id") != cid]
+    print(f"dana sees       : {[c.get('id') for c in hers]}  <- Derek's, and nothing else")
+    if forked:
+        failures.append(f"Dana was forked into her own party: {[c.get('id') for c in forked]}")
+    if _AUTH and cid not in [c.get("id") for c in hers]:
+        failures.append("Dana joined but the challenge is not in her list -- she would "
+                        "see an empty quest picker after following an invite link")
 
     # 4. Is the roster actually two people now?
-    party = (_get(base, f"/api/challenges/{cid}/dashboard").get("summary") or {}).get("party") or []
+    party = (_get(base, f"/api/challenges/{cid}/dashboard",
+                  user=derek).get("summary") or {}).get("party") or []
     print(f"party roster    : {len(party)} -> {party}")
     if len(party) < 2:
         failures.append(f"the roster still reads {len(party)} after a teammate joined")

@@ -82,6 +82,52 @@ else if (/node_id|"/.test(noneNeeded)) fail('all-skipped summary leaks wire form
 
 if (specSummary('not json at all') !== null) fail('specSummary should return null on prose');
 if (specSummary('{"specs": []}') !== null) fail('specSummary should return null on empty specs');
+
+// ---- 4. checklistItems, which decides whether a tool is usable or just readable --
+// A `checklist` that fails to parse into items falls through to `<pre class="src">`,
+// so this function is the whole difference between a tool you tick and a tool you
+// read. Both cases below are VERBATIM shapes from tools the Toolwright built on
+// production -- not invented ones. The first shipped broken.
+const clSrc = src.match(/function checklistItems\(src\)[\s\S]*?\n}\n/)?.[0];
+if (!clSrc) fail('could not extract checklistItems from app.html');
+else {
+  const c2 = vm.createContext({ JSON });
+  vm.runInContext(clSrc + '\nthis.checklistItems = checklistItems;', c2);
+  const { checklistItems } = c2;
+
+  // Nested one level down, with no array at the top level at all.
+  const nested = checklistItems(JSON.stringify({
+    tool_name: 'Race Week Taper', target_finish_time: '54:50',
+    taper_workout_schedule: {
+      volume_reduction: 'Reduce volume 40% race week',
+      schedule: [
+        { day: 'Sunday (-7 days)', workout: 'Final light long run: 8 km easy pace' },
+        { day: 'Monday (-6 days)', workout: 'Rest day / Foam rolling' },
+      ],
+    },
+  }));
+  if (!nested) fail('a checklist whose items are nested one level renders as raw JSON');
+  else {
+    if (nested.length !== 2) fail(`nested checklist: ${nested.length} items, expected 2`);
+    // `{day, workout}` uses none of the known text keys. Dropping it lost the tool.
+    if (!/Sunday/.test(nested[0]?.text || ''))
+      fail('unfamiliar item keys were discarded: ' + JSON.stringify(nested[0]));
+  }
+
+  // A top-level array must still win over anything buried deeper.
+  const top = checklistItems(JSON.stringify({
+    title: 'Winter Gear',
+    checklist_items: [{ step: 1, item: 'Gait test', description: 'At a running shop' }],
+    appendix: { notes: { extra: ['not these'] } },
+  }));
+  if (!top || top.length !== 1 || top[0].text !== 'Gait test')
+    fail('a top-level checklist lost to a nested array: ' + JSON.stringify(top));
+
+  if (checklistItems('def main():') !== null) fail('Python parsed as a checklist');
+  if (checklistItems('{"a": 1}') !== null) fail('an object with no list became items');
+  if (!process.exitCode) ok('checklistItems finds items in the shapes the model emits');
+}
+
 if (!process.exitCode) {
   ok('specSummary renders a sentence, not a payload');
   console.log('\n--- what the user now sees instead of JSON ---\n' + summary + '\n');

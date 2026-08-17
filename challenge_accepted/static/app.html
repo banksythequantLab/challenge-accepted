@@ -1275,6 +1275,18 @@ function checklistItems(src) {
       for (const k of ['items', 'steps', 'checklist', 'tasks', 'list'])
         if (Array.isArray(v[k])) return v[k];
       for (const k of Object.keys(v)) if (Array.isArray(v[k])) return v[k];
+      //: Only now go deeper. A live checklist parked its steps under
+      //: `taper_workout_schedule.schedule` -- no array at the top level at all --
+      //: and this walk stopped one level short, so the user was shown raw JSON for
+      //: a tool that had perfectly good items in it. Depth-last, so a top-level
+      //: `checklist_items` still wins over anything buried.
+      for (const k of Object.keys(v)) {
+        const nested = v[k];
+        if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+          const hit = findArray(nested);
+          if (hit) return hit;
+        }
+      }
     }
     return null;
   };
@@ -1286,10 +1298,17 @@ function checklistItems(src) {
     if (it && typeof it === 'object') {
       const text = it.text || it.item || it.task || it.label || it.title ||
                    it.step || it.name || it.description;
-      if (!text) return null;
-      const note = it.note || it.detail || it.details || it.hint ||
-                   (it.description && it.description !== text ? it.description : '');
-      return { text: String(text), note: note ? String(note) : '' };
+      if (text) {
+        const note = it.note || it.detail || it.details || it.hint ||
+                     (it.description && it.description !== text ? it.description : '');
+        return { text: String(text), note: note ? String(note) : '' };
+      }
+      //: No key we recognise. The model names its own fields, so `{day, workout}`
+      //: is as legitimate as `{text, note}` -- and returning null here threw away a
+      //: whole readable checklist over vocabulary. Take the strings in order.
+      const words = Object.values(it).filter(x => typeof x === 'string' && x.trim());
+      if (!words.length) return null;
+      return { text: String(words[0]), note: words.slice(1).join(' - ') };
     }
     return null;
   }).filter(Boolean);

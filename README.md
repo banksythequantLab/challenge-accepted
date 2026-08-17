@@ -33,7 +33,7 @@ service broke.
 | Verified | 137 tests pass against a real ADK `Runner`, plus 18 live checks that drive the actual controls; FastAPI boots, `/api/healthz` 200. All of them re-run against the current build after today's deploys -- not carried over from a green run last week |
 | Verified live | **The layout holds on seven viewports, on the deployed site.** `scripts\check_devices.py https://challengeaccepted.app`: Galaxy S9+ 320, iPhone 13 390, Pixel 7 412 (the first Android ever tested), iPad Mini 768, iPad landscape 1024, laptop 1280 and 1440 -- rendering a real challenge pulled from the live API. Three bugs found, the third by looking at the screenshots after every numeric assertion had passed. See Known issues |
 | Verified live | **Two people, one challenge, on the deployed service.** `scripts\check_party_live.py`: Dana joins with nothing but a challenge id and is told *"Cloud Run failed due to GCP admin and billing restrictions, so all hosting is strictly on Vercel"* -- Derek's discovery, which she had no other way to know -- then handed an open node by name. Her private group stays empty; the roster reads 2. This is the beat at 2:20 in the demo script, and until now it had only ever been proven against localhost |
-| Verified live | **FORGE drains the whole queue on the deployed service.** Two consecutive runs: **6 specs asked / 6 tools built**, then **7 / 7**. `scripts\check_forge_live.py` compares the Quartermaster's specs against what was persisted and fails on any gap. Three bugs deep: **0 tools** on every revision, then **1 of 7** with three workers silently cancelled, then **4 of 7** with the second batch idling. See Known issues |
+| Verified live | **FORGE drains the whole queue on the deployed service.** Two consecutive runs: **6 specs asked / 6 tools built**, then **7 / 7**. `scripts\check_forge_live.py` compares the Quartermaster's specs against what was persisted and fails on any gap. Three bugs deep: **0 tools** on every revision, then **1 of 7** with three workers silently cancelled, then **4 of 7** with the second batch idling. Then a fourth thing, which was not a bug in FORGE at all: **sign-in locked this check out of production**, and for several revisions the only measurement of the money shot was nothing. It signs in now, and the run that proves it is **6 asked / 6 built** in 170s with four Toolwrights working concurrently on the current revision. See Known issues |
 | Measured | One full challenge (12 nodes, 6 tools) = **243k prompt / 66k billed output, ~$0.86**. Break-even at $29/seat ≈ **34 challenges/user/month** |
 | Fixed | The "exactly 4 tools" ceiling. Two causes, both live-only. See Known issues. |
 | Verified live | CLIMB end to end: node closed on evidence, feedback captured with reason, blocker -> group fact -> interview re-opened -> graph redrawn around the constraint |
@@ -47,7 +47,8 @@ service broke.
 | Verified | Every copy-to-clipboard path returns the right markdown, on desktop and on an iPhone 13 viewport -- `scripts\check_copy.py` reads the clipboard back and asserts on content |
 | Built | Conversations persist in Firestore via a custom `BaseSessionService`, registered under a `firestore://` scheme through ADK's own service registry. Survives an instance swap and a redeploy |
 | Not built | Group-scoped memory. Memory Bank is per-user by design; the party's shared memory is still Firestore `group_facts`. See Next |
-| Not built | Firebase Auth. Users are anonymous ids in `localStorage` |
+| Verified live | **Google Sign-In, and a membership wall behind it.** `scripts\check_auth_live.py` is the only check in this repo written from the *outside* -- every assertion is something that must FAIL. With no token: 401 on the challenge list, on session creation and on `/run_sse`. With a structurally valid JWT signed by nobody: 401, so tokens are verified rather than decoded. **Signed in as a real stranger holding a leaked challenge id: 403 on its dashboard, tools and journal, and their own list comes back empty.** An account gets you a door, not a challenge. The ADK dev UI -- which runs agents as any user id you type into it -- is 404. `/app`, `/api/auth/config` and `/api/healthz` stay open, or nobody could sign in. `scripts\check_gate_ui.py` confirms a stranger gets a door and not a broken app: 0 refused calls, 0 page errors |
+| Verified live | **Light and dark, and the choice sticks.** `scripts\check_theme.py` drives the deployed site with the OS preference forced each way, reads nine computed surfaces in both, toggles, reloads, and checks that a saved light choice still wins under an OS that prefers dark |
 
 Reproduce with `python scripts\live_walk.py` (costs ~$0.86, prints full token accounting).
 
@@ -591,11 +592,18 @@ convention. Every one of them is real now — Memory Bank last — so no card is
 more, and the legend says exactly that rather than describing a convention nothing
 uses. The code-execution card names the `BuiltInCodeExecutor` actually in play and says
 what would replace it. The top band once claimed a Next.js client with Firebase Auth and
-React Flow; the real client is one static HTML file with anonymous ids in
-`localStorage`, and it says that now.
+React Flow; the real client is one static HTML file, and it says that now.
 
 A diagram that describes what you wish you had built is worth less than no diagram —
 and a legend nobody can find an example of is the same failure in miniature.
+
+**The same failure, in the other direction.** Firebase Auth is real now — Google
+Sign-In, verified server-side, with a membership wall behind it — but for a stretch of
+revisions the status table above still carried a row reading *"Not built: Firebase Auth.
+Users are anonymous ids in `localStorage`"* while the deployed site was refusing anyone
+without a Google account. Wrong in the flattering direction and wrong in the modest
+direction are the same defect: the document had stopped describing the system. A status
+table nobody re-reads after shipping is a wishful diagram with extra steps.
 
 **The client-side belt to that braces.** Even with durable sessions, a client can hold
 an id the server will not honour — a wiped collection, a session deleted out from
@@ -985,7 +993,15 @@ docs/                 plan + architecture diagram
    scale past a few dozen facts. The obvious move is a second memory scope keyed on
    `group_id`; the obvious risk is writing one person's private context into a group
    everyone can read, so it needs a rule about what is shareable before it needs code.
-2. Firebase Auth, replacing the anonymous `localStorage` ids.
+2. ~~**Firebase Auth, replacing the anonymous `localStorage` ids.**~~ **Done, and it
+   broke two things on the way in.** Google Sign-In, verified server-side, with
+   membership required: an invite link now means *sign in → join → see*. What is still
+   missing is everything around the edges of a party. Anyone holding an invite link can
+   join — there is no approval and no way to remove someone. Test identities named
+   `ca_test_*` accumulate on rosters with nothing that reaps them. And the checks that
+   drive production had to be taught to sign in one at a time; two of them were blind
+   to the deployed service for several revisions, which is precisely when a Vertex
+   crash came back unnoticed.
 3. ~~**Map `challengeaccepted.app`.**~~ **Done.** Both mappings report `Ready=True` and
    `CertificateProvisioned=True`; `https://challengeaccepted.app/app` and the `www` host
    both serve the dashboard. Kept here because the route to it has three traps worth

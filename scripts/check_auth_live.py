@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import sys
 import uuid
+from pathlib import Path
 
 import requests
 
@@ -83,6 +84,37 @@ def main() -> int:
                                                   headers=forged, timeout=60))
     must_fail("POST /run_sse", requests.post(f"{base}/run_sse", headers=forged,
                                              timeout=60, json={"userId": "x"}))
+
+    # --- the second lock ---------------------------------------------------------
+    # A door that only stops people without accounts is not a door. Anyone can get a
+    # Google account in ninety seconds, so the question that actually matters is what
+    # a *signed-in stranger* can see. This is the only assertion here that exercises
+    # `_mine()` rather than the token check, and it needs a REAL token -- a forged one
+    # dies at the gate and would pass this section for the wrong reason.
+    if cid:
+        _p("\nsigned in, but not on this challenge's party:")
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        try:
+            from testauth import mint
+
+            stranger = {"Authorization": "Bearer " + mint()}
+        except Exception as e:  # noqa: BLE001 -- credentials, not logic
+            _p(f"  SKIPPED  could not mint a test identity: {type(e).__name__}: {e}")
+            bad.append("the membership wall went unmeasured -- minting a real token "
+                       "failed, so nothing here tested `_mine()`")
+        else:
+            for path in ("dashboard", "tools", "journal"):
+                must_fail(f"GET /api/challenges/{cid}/{path}",
+                          requests.get(f"{base}/api/challenges/{cid}/{path}",
+                                       headers=stranger, timeout=60), allowed=(403,))
+            r = requests.get(f"{base}/api/challenges", headers=stranger, timeout=60)
+            listed = r.json() if r.ok else []
+            listed = listed.get("challenges", listed) if isinstance(listed, dict) else listed
+            ids = [c.get("id") for c in listed] if isinstance(listed, list) else []
+            _p(f"  {'ok     ' if cid not in ids else 'LEAKED '}  {r.status_code:<4} "
+               f"GET /api/challenges lists {len(ids)} of their own")
+            if cid in ids:
+                bad.append(f"{cid} appears in a stranger's challenge list")
 
     _p("\nwhat must STILL be reachable (or nobody can sign in):")
     for label, url in (("GET /app", f"{base}/app"),

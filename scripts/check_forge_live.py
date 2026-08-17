@@ -19,6 +19,13 @@ Quartermaster asked for, which lives in session state because an agent with an
     python scripts\\check_forge_live.py https://challengeaccepted.app
 
 Exit 0 only if at least one tool was built AND every spec that asked for a tool got one.
+
+**Signed in since Google Sign-In shipped.** For several revisions this check could not
+reach production at all -- every call came back 401 and the only honest thing to say
+about FORGE on the deployed service was that nothing was measuring it. That gap cost
+real time: the returning `ValueError` about code-part ids was eventually found by
+reading a stream trace line by line, and this is the check whose entire job is to catch
+exactly that. It now mints a throwaway identity the same way the other live checks do.
 """
 
 from __future__ import annotations
@@ -26,11 +33,40 @@ from __future__ import annotations
 import json
 import sys
 import time
+import urllib.error
 import urllib.request
 import uuid
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 APP = "challenge_accepted"
 DEFAULT_URL = "https://challengeaccepted.app"
+
+#: The signed-in identity everything below runs as. `None` on a deployment with auth
+#: off, which keeps this check usable against a local server.
+_UID: str | None = None
+_TOKEN: tuple[float, str] = (0.0, "")
+
+
+def _auth() -> dict[str, str]:
+    """A bearer token for the test identity, re-minted before it can expire.
+
+    A full FORGE run is four turns of up to ten minutes each, and a Firebase ID token
+    lasts an hour. Minting once at the top would let a long run die on a 401 in the
+    final turn -- which reads exactly like the product failing, and is the kind of
+    false accusation this file already has a comment apologising for.
+    """
+    global _TOKEN
+    if _UID is None:
+        return {}
+    minted, token = _TOKEN
+    if not token or time.time() - minted > 1800:
+        from testauth import mint
+
+        token = mint(_UID)
+        _TOKEN = (time.time(), token)
+    return {"Authorization": "Bearer " + token}
 
 TURNS = [
     "I want to run a 10k in under 55 minutes by Christmas.",
@@ -45,9 +81,17 @@ def _json(url, body=None, timeout=600):
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
         url, data=data, method="POST" if data else "GET",
-        headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        raw = r.read().decode("utf-8", "replace")
+        headers={"Content-Type": "application/json", **_auth()})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        # A 401/403 is the check failing to sign in, not FORGE failing to build. Say
+        # which, out loud -- a silent auth failure here would look like an empty run.
+        detail = e.read().decode("utf-8", "replace")[:200]
+        raise SystemExit(
+            f"\n{e.code} from {url}\n{detail}\n"
+            "This is the CHECK being refused, not the product misbehaving.") from None
     try:
         return json.loads(raw)
     except json.JSONDecodeError:
@@ -118,12 +162,28 @@ def _specs_from_state(state):
 
 
 def main(base: str) -> int:
+    global _UID
     base = base.rstrip("/")
-    user = f"forge_{uuid.uuid4().hex[:8]}"
-    sid = "s_" + uuid.uuid4().hex[:10]
     health = _json(base + "/api/healthz", timeout=60)
     print(f"target : {base}")
-    print(f"health : store={health.get('store')} memory={health.get('memory')}\n")
+    print(f"health : store={health.get('store')} memory={health.get('memory')} "
+          f"auth={health.get('auth')}")
+
+    # The identity has to BE the path user. authgate.py refuses any request whose
+    # `/users/<id>/` segment disagrees with the verified token, which is the whole
+    # point of it -- so the check signs in as the user it is about to act as rather
+    # than inventing a name and bolting a token on beside it.
+    if health.get("auth") == "required":
+        from testauth import PREFIX
+
+        _UID = PREFIX + "forge_" + uuid.uuid4().hex[:6]
+        _auth()  # mint now, so a credentials problem fails here and not mid-run
+        print(f"signed in as {_UID}\n")
+    else:
+        _UID = None
+        print("auth off on this deployment -- running unauthenticated\n")
+    user = _UID or f"forge_{uuid.uuid4().hex[:8]}"
+    sid = "s_" + uuid.uuid4().hex[:10]
 
     _json(f"{base}/apps/{APP}/users/{user}/sessions",
           {"session_id": sid, "state": {"user_id": user, "group_id": f"grp_{user}"}},

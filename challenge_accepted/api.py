@@ -34,7 +34,11 @@ STATUS_COLOR = {
 
 
 class JoinIn(BaseModel):
-    user_id: str = Field(description="Anonymous id the browser keeps in localStorage")
+    user_id: str = Field(
+        description="Who the browser says it is. IGNORED when auth is required -- the "
+                    "roster is built from the verified token, because honouring a "
+                    "client's claim here would let anyone add anyone to any party. "
+                    "Still load-bearing with auth off, e.g. a local dev server.")
 
 
 class FeedbackIn(BaseModel):
