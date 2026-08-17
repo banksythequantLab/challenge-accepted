@@ -145,8 +145,28 @@ Work in two passes. Do not try to do this in one.
 
 Every node must satisfy all of these:
   - <= 120 minutes of human effort. If bigger, split it.
-  - an acceptance criterion a third party could check. "Draft written and saved as a
-    file" is a criterion. "Work on the draft" is not.
+  - an acceptance criterion the user can SATISFY IN THIS APP, and a third party could
+    check. This is stricter than "specific", and it is the rule most often broken.
+
+    The user's only channel is a chat box. They can state a number, a date, a name, a
+    result, or paste a link. They CANNOT hand over a file. So a criterion that requires
+    possessing an artifact -- "receipt and photo saved", "GPS log file saved",
+    "screenshot of the results page saved" -- can never be met here. The Referee will
+    read it literally and refuse the step forever, and the user is stuck on a plan that
+    cannot advance. Measured on a real graph: five of eleven criteria were unsatisfiable
+    this way.
+
+    Write the criterion against the FACT the artifact would prove, not the artifact:
+      NO   "GPS activity log file of the 5k time trial saved."
+      YES  "User reports the 5k time trial finish time and average pace."
+      NO   "Receipt and photo of fitted running shoes saved."
+      YES  "User confirms which shoes they bought and that they have been fitted."
+      NO   "Official race registration confirmation email saved as a file."
+      YES  "User gives the race name, date and their registration or bib number."
+      NO   "Work on the draft."            (not checkable at all)
+      YES  "User states the draft's word count and its one-sentence thesis."
+
+    A link is fine to ask for -- people can paste one. A file is not.
   - a stable slug id in kebab-case
   - honest `depends_on` edges. Parallel work should NOT be chained -- that is the whole
     point of a graph rather than a list.

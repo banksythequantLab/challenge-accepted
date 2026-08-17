@@ -55,7 +55,14 @@ class GoalNode(BaseModel):
     title: str
     description: str
     acceptance_criteria: str = Field(
-        description="A single sentence a third party could verify. Not 'work on X'."
+        description=(
+            "A single sentence a third party could verify, stated as something the "
+            "user can TELL you: a number, a date, a name, a result, or a link. Never "
+            "require a file, photo, screenshot or receipt -- the user has a chat box "
+            "and cannot hand one over, so the Referee would refuse the step forever. "
+            "Good: 'User reports the 5k finish time and average pace.' "
+            "Bad: 'GPS log file saved.'"
+        )
     )
     depends_on: list[str] = Field(
         default_factory=list, description="ids of nodes that must finish first."
