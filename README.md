@@ -30,11 +30,14 @@ service broke.
 |---|---|
 | Verified **locally** | 8-turn interview -> charter saved -> 12-node DAG -> 6 tools built, smoke-tested and persisted. This row said *Verified live* for weeks and was wrong: it was only ever true against a local server on a `GOOGLE_API_KEY`. On the deployed service every Toolwright was dying. See Known issues |
 | Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
-| Verified | **161** tests pass against a real ADK `Runner`, plus **28** checks in `scripts\check_*` that drive the actual controls; FastAPI boots, `/api/healthz` 200. All of them re-run against the current build after today's deploys -- not carried over from a green run last week. That count was stale at *137 tests, 18 live checks* for a while, which is a small lie of the same species as the auth row below |
+| Verified | **173** tests pass against a real ADK `Runner`, plus **30** checks in `scripts\check_*` that drive the actual controls; FastAPI boots, `/api/healthz` 200. All of them re-run against the current build after today's deploys -- not carried over from a green run last week. That count was stale at *137 tests, 18 live checks* for a while, which is a small lie of the same species as the auth row below |
 | Verified live | **The layout holds on seven viewports, on the deployed site.** `scripts\check_devices.py https://challengeaccepted.app`: Galaxy S9+ 320, iPhone 13 390, Pixel 7 412 (the first Android ever tested), iPad Mini 768, iPad landscape 1024, laptop 1280 and 1440 -- rendering a real challenge pulled from the live API. Three bugs found, the third by looking at the screenshots after every numeric assertion had passed. See Known issues |
 | Verified live | **Two people, one challenge, on the deployed service.** `scripts\check_party_live.py`: Dana joins with nothing but a challenge id and is told *"Cloud Run failed due to GCP admin and billing restrictions, so all hosting is strictly on Vercel"* -- Derek's discovery, which she had no other way to know -- then handed an open node by name. Her private group stays empty; the roster reads 2. This is the beat at 2:20 in the demo script, and until now it had only ever been proven against localhost |
 | Verified live | **FORGE drains the whole queue on the deployed service.** Two consecutive runs: **6 specs asked / 6 tools built**, then **7 / 7**. `scripts\check_forge_live.py` compares the Quartermaster's specs against what was persisted and fails on any gap. Three bugs deep: **0 tools** on every revision, then **1 of 7** with three workers silently cancelled, then **4 of 7** with the second batch idling. Then a fourth thing, which was not a bug in FORGE at all: **sign-in locked this check out of production**, and for several revisions the only measurement of the money shot was nothing. It signs in now, and the run that proves it is **6 asked / 6 built** in 170s with four Toolwrights working concurrently on the current revision. See Known issues |
-| Measured, and bad | **Only 2 of the 6 tools FORGE built can actually be used.** `scripts\check_tool_render.py` applies `app.html`'s own two predicates to a real challenge on the deployed service and counts what survives. `mini_app` runs in a sandboxed iframe and `checklist` becomes tick boxes; `calculator`, `tracker` and `drill` are Python, and the dashboard has no way to run Python, so they render as source code in a box. It was 1 of 6 until a checklist-parsing fix landed. The headline claim is *this one builds you the tools* -- for two thirds of them it currently builds you a file to read. See Known issues |
+| Verified live | **7 of 7 tools open and work** -- and it was 2 of 6 the same day. `scripts\check_tool_render.py --browser` loads each one into a real sandboxed iframe with `app.html`'s own flags and its own storage shim, and reads back the worked example the Toolwright is required to render on load. Two of the seven were caught by that browser pass alone: a checklist the parser could not read, and a tracker that threw `Access is denied` on `localStorage` and was a **white rectangle** to anyone who opened it. Both passed every check that did not actually run them. See Known issues |
+| Verified live | **You can leave a party, and leaving means something.** `scripts\check_party_exit_live.py`: a teammate joins on an invite link, leaves on her own request, and is then 403 on the dashboard, the tools and the journal, with the quest gone from her picker. A plain member cannot remove anyone else; the owner can; nobody can remove the owner. What she discovered stays -- her leaving does not make it untrue. Six unit tests pin the same rules |
+| Verified live | **A refused step gets written down.** The Referee held every tool it needed to say no and none to record having said it, so a step attempted twice and refused twice looked identical to one nobody had touched. On the deployed service, vague evidence now leaves a journal entry: *"Claimed the baseline fitness time trial was done without providing the baseline time trial distance, finish time, or average pace."* |
+| Verified live | **Shared memory is bounded, and says when it is.** `scripts\check_fact_budget_live.py` seeds a party past the budget on production and reads what the model was actually handed: **40 facts of 60, `group_facts_withheld: 20`**, plus a note telling it to say the team may know more rather than that something is unknown. Five unit tests pin the ranking. It also measured the honest limit -- an old fact sharing no words with the goal can lose to newer noise, and the check reports that rather than asserting a guarantee the design cannot make |
 | Measured | One full challenge (12 nodes, 6 tools) = **243k prompt / 66k billed output, ~$0.86**. Break-even at $29/seat ≈ **34 challenges/user/month** |
 | Fixed | The "exactly 4 tools" ceiling. Two causes, both live-only. See Known issues. |
 | Verified live | CLIMB end to end: node closed on evidence, feedback captured with reason, blocker -> group fact -> interview re-opened -> graph redrawn around the constraint |
@@ -598,11 +601,11 @@ React Flow; the real client is one static HTML file, and it says that now.
 A diagram that describes what you wish you had built is worth less than no diagram —
 and a legend nobody can find an example of is the same failure in miniature.
 
-### Open: two thirds of the tools are a file to read, not a tool to use
+### Fixed: two thirds of the tools were a file to read, not a tool to use
 
-This one is not fixed, and it is the biggest thing left. The pitch is one sentence:
-*every other AI gives you a plan, this one builds you the tools.* On a real challenge
-on the deployed service, measured by `scripts\check_tool_render.py`:
+The pitch is one sentence: *every other AI gives you a plan, this one builds you the
+tools.* On a real challenge on the deployed service, measured by
+`scripts\check_tool_render.py`:
 
 ```
   [runs  ] checklist    Race Week Taper and Strategy Checklist    3 tick boxes
@@ -637,7 +640,42 @@ Three ways out, in order of how much they cost:
 3. **Execute server-side.** Needs a real sandbox. `BuiltInCodeExecutor` is model-side
    and belongs to the agent, not to the user pressing a button.
 
-Option 1 is the one that fits, and it is not done.
+**Option 1, and it works: 7 of 7 on the next live run.** The Python did not go away --
+the Toolwright still proves the arithmetic by running it, because that discipline is
+what makes the tool correct. It then ports the verified formula into inline JavaScript
+and renders the smoke test's own example on load inside a `data-smoke` element. That
+element is the whole safety net: a hand port from Python to JavaScript that nothing
+checks is a hand port that drifts, and `--browser` reads it back out of a real iframe.
+
+Honest cost: the FORGE turn went from **170s to 361s**. Every worker now does two
+pieces of work instead of one. That is the price of the tool being usable, and the
+check prints both numbers.
+
+**And then the browser pass found what the predicates could not.** All seven looked
+runnable. Opened in a real sandboxed iframe, one threw at the top of its script:
+
+```
+Failed to read the 'localStorage' property from 'Window':
+The document is sandboxed and lacks the 'allow-same-origin' flag
+```
+
+A sandboxed iframe has no storage, and *reading* `localStorage` throws. The Aerobic
+Base Phase Running Log was a white rectangle to anyone who opened it, and it passed
+everything that did not actually run it. Two fixes, because they answer different
+questions: the Toolwright is told never to touch browser storage (and to offer a Copy
+button rather than a save button that silently loses somebody's week), and `app.html`
+injects an in-memory stub ahead of every tool page — which is the half that covers the
+tools built *before* the prompt changed, of which there are forty-five challenges'
+worth. Loosening the sandbox was never on the table: `allow-same-origin` would hand
+model-written JavaScript the dashboard's own origin, session and token.
+
+The check was wrong first, and that is worth recording too. It faked the sandbox with
+`page.set_content` plus `add_init_script` — and `add_init_script` does not apply to
+`set_content`, it only runs on navigation, so the shim never executed and a tool that
+works in the product was reported as broken. Simulating an environment is how a check
+ends up measuring its own simulation. It now loads each tool into a real sandboxed
+iframe with the product's actual flags, and reads the product's actual shim out of
+`app.html` rather than keeping a second copy that nobody would notice going stale.
 
 **Fixed on the way to measuring it:** one of the two checklists was also rendering as
 raw JSON. `checklistItems` walked one level for an array and this tool had parked its
@@ -1030,7 +1068,7 @@ challenge_accepted/
     store.py          Firestore repository, in-memory fallback
     tools.py          ADK FunctionTools over the store
 main.py               Cloud Run entrypoint via get_fast_api_app
-tests/                161 tests, no API key required
+tests/                173 tests, no API key required
 scripts/              live walkthroughs and browser-driven end-to-end checks
 deploy/               deploy.ps1, check.ps1, smoke_live.ps1, SETUP.md
 docs/                 plan + architecture diagram
@@ -1038,28 +1076,44 @@ docs/                 plan + architecture diagram
 
 ## Next
 
-1. **Make the tools usable, not just readable.** Measured on production: 2 of 6.
-   `calculator`, `tracker` and `drill` come out as Python and open as source code in a
-   box. The fix that fits the architecture is to have the Toolwright emit a
-   self-contained `mini_app` for the interactive types — the renderer for those already
-   exists and already sandboxes them. This is first on the list because it is the one
-   gap that undercuts the sentence at the top of this file. See Known issues.
+1. ~~**Make the tools usable, not just readable.**~~ **Done: 2 of 6 → 7 of 7 on the
+   deployed service.** See Known issues, including the white-rectangle tracker the
+   browser pass caught on its first run and the 170s → 361s cost of getting there.
+   What is still open is narrower: `script` and `research_brief` are prose by design,
+   and a `tracker` cannot persist anything between sessions, because a sandboxed page
+   has nowhere to put it. Saving a tracker's entries needs a server-side home and a
+   decision about who owns that data.
 2. **Group-scoped memory.** Memory Bank is live and proven (see Known issues), but it
    scopes to `(app_name, user_id)` -- it is personal recall across challenges. A
    teammate joining a party does not inherit it. The party's shared memory is still
-   `remember_group_fact` -> Firestore, read wholesale into the prompt, which does not
-   scale past a few dozen facts. The obvious move is a second memory scope keyed on
-   `group_id`; the obvious risk is writing one person's private context into a group
-   everyone can read, so it needs a rule about what is shareable before it needs code.
+   `remember_group_fact` -> Firestore.
+
+   It is at least **bounded** now: 40 facts reach the prompt and the model is told how
+   many did not, verified on production with `check_fact_budget_live.py`. Bounded is
+   not the same as scaled. The ranking is content-word overlap -- a lexical guess that
+   demonstrably drops an old fact sharing no words with the goal -- and the real fix is
+   a second memory scope keyed on `group_id` with embeddings behind it. The obvious
+   risk is writing one person's private context into a group everyone can read, so it
+   needs a rule about what is shareable before it needs code.
 3. ~~**Firebase Auth, replacing the anonymous `localStorage` ids.**~~ **Done, and it
    broke two things on the way in.** Google Sign-In, verified server-side, with
    membership required: an invite link now means *sign in → join → see*. What is still
-   missing is everything around the edges of a party. Anyone holding an invite link can
-   join — there is no approval and no way to remove someone. Test identities named
-   `ca_test_*` accumulate on rosters with nothing that reaps them. And the checks that
-   drive production had to be taught to sign in one at a time; two of them were blind
-   to the deployed service for several revisions, which is precisely when a Vertex
-   crash came back unnoticed.
+   missing is the front door, not the back one. **Leaving and removing work now** and
+   are proven on production (see the status table); what a party still has no concept
+   of is *approval* — anyone holding a link can walk in, and the owner finds out
+   afterwards. For a link you chose to send that is the intended behaviour. For a link
+   that leaks it is not, and the honest position is that the remedy is now eviction
+   rather than prevention.
+
+   `scripts\reap_test_users.py` sweeps the `ca_test_*` identities the live checks
+   leave behind. Run against production it found **nothing to reap**: twelve
+   challenges are owned outright by test identities, and none of them is sitting on a
+   real person's quest. The mess I went looking for was not there, which is worth
+   writing down as plainly as if it had been.
+
+   And the checks that drive production had to be taught to sign in one at a time; two
+   of them were blind to the deployed service for several revisions, which is precisely
+   when a Vertex crash came back unnoticed.
 4. ~~**Map `challengeaccepted.app`.**~~ **Done.** Both mappings report `Ready=True` and
    `CertificateProvisioned=True`; `https://challengeaccepted.app/app` and the `www` host
    both serve the dashboard. Kept here because the route to it has three traps worth
