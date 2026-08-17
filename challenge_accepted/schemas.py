@@ -123,7 +123,12 @@ class BuiltTool(BaseModel):
     node_id: str
     tool_type: ToolType
     name: str
-    source: str = Field(description="Python source, JSON, or a self-contained HTML document.")
+    source: str = Field(
+        description="What the user opens. A self-contained HTML document for "
+                    "calculator/tracker/drill/mini_app -- the dashboard runs it in a "
+                    "sandboxed iframe and the user cannot run Python. JSON for "
+                    "checklist, plain text for script and research_brief."
+    )
     usage: str = Field(description="One paragraph telling the user how to use it.")
     smoke_test_passed: bool
     smoke_test_output: str = ""

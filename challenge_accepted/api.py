@@ -274,6 +274,57 @@ def join_challenge(challenge_id: str, body: JoinIn,
     return {"status": "ok", "group_id": group_id, "party": _party(challenge)}
 
 
+@router.delete("/challenges/{challenge_id}/party/{user_id}")
+def remove_from_party(challenge_id: str, user_id: str,
+                      caller: auth.Caller = Depends(current)) -> dict[str, Any]:
+    """Take somebody off the party. Yourself always; anyone else only if you own it.
+
+    A door with no handle on the inside is not a door. Until this route existed the
+    party was append-only: anyone holding an invite link could join, nobody could
+    leave, and nobody could be removed -- so a link forwarded once was permanent
+    access to somebody's plan, their journal and their tools. That is a worse failure
+    than the one the membership wall was built to fix, because it is silent.
+
+    Two rules, and no third:
+
+      * you may always remove YOURSELF -- leaving is not something you ask permission
+        for, and the alternative is a product that can trap you in a stranger's party;
+      * the OWNER may remove anyone else. Not "any member": a teammate who could evict
+        the person whose goal it is would be a takeover, and on a party you join by
+        link that is not hypothetical.
+
+    The owner cannot be removed at all, including by themselves. Their user id is on
+    the challenge document, so an ownerless challenge is not a state the rest of this
+    file knows how to render.
+    """
+    challenge = _challenge_or_404(challenge_id)
+    group_id = str(challenge.get("group_id") or "")
+    if not group_id:
+        raise HTTPException(status_code=409, detail="Challenge has no group")
+
+    owner = str(challenge.get("owner_id") or "")
+    if auth.required():
+        if user_id != caller.uid and caller.uid != owner:
+            raise HTTPException(
+                status_code=403,
+                detail="Only the person who started this quest can remove someone else.")
+        if caller.uid != owner and caller.uid not in _members(challenge):
+            raise HTTPException(status_code=403, detail="You are not on this party.")
+    if user_id == owner:
+        raise HTTPException(
+            status_code=409,
+            detail="The person who started this quest cannot be removed from it.")
+
+    before = _members(challenge)
+    store.leave_group(group_id, user_id)
+    return {
+        "status": "ok" if user_id in before else "not_a_member",
+        "removed": user_id,
+        "left": user_id == (caller.uid if auth.required() else user_id),
+        "party": _party(challenge),
+    }
+
+
 @router.get("/challenges/{challenge_id}/graph")
 def get_graph(challenge_id: str, include_superseded: bool = False,
               caller: auth.Caller = Depends(current)) -> dict[str, Any]:

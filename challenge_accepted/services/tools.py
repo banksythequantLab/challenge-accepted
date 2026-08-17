@@ -12,15 +12,33 @@ and the model reads the status and adapts.
 
 from __future__ import annotations
 
+import os
 from typing import Any, Optional
 
 from google.adk.tools import ToolContext
 
 from . import memory
-from .store import store
+from .store import _content_words, store
 
 PENDING_JOURNAL = "journal.pending"
 JOINED_GROUP = "joined_group"
+
+#: How many group facts may reach the model in one `read_challenge_state`.
+#:
+#: This used to be "all of them". Shared memory is the product's centre of gravity, so
+#: the list only grows -- and every fact is re-sent on every tool call, on every turn,
+#: for every agent that holds this tool. At a few dozen facts that is already a
+#: measurable share of a 243k-token challenge, and it degrades in the worst way: the
+#: model does not error, it just gets a wall of context and starts missing things in
+#: the middle of it. A party that has been working for a month would quietly get worse
+#: at remembering than one that started yesterday.
+GROUP_FACT_BUDGET = int(os.getenv("CA_GROUP_FACT_BUDGET", "40"))
+
+#: Newest facts are kept regardless of how they score. Relevance ranking is a lexical
+#: guess; recency is a fact. The thing a teammate most needs to know is usually what
+#: somebody found out an hour ago, and that is exactly what a bag-of-words score
+#: against an old charter would rank last.
+GROUP_FACT_RECENT = 8
 
 
 def _challenge_id(tool_context: ToolContext) -> Optional[str]:
@@ -356,9 +374,10 @@ def read_challenge_state(tool_context: ToolContext) -> dict[str, Any]:
         A dict with status, charter, nodes, tools, group_facts, recent_journal and
         tool_feedback.
     """
-    group_facts = (store.get("groups", _group_id(tool_context)) or {}).get("shared_facts", [])
+    all_facts = (store.get("groups", _group_id(tool_context)) or {}).get("shared_facts", [])
     cid = _challenge_id(tool_context)
     if not cid:
+        group_facts, withheld = _facts_for_prompt(all_facts, "")
         return {
             "status": "no_challenge",
             "message": "No challenge started yet. Begin the interview from scratch.",
@@ -366,24 +385,91 @@ def read_challenge_state(tool_context: ToolContext) -> dict[str, Any]:
             "nodes": [],
             "tools": [],
             "group_facts": group_facts,
+            **_withheld_note(withheld),
         }
     challenge = store.get("challenges", cid) or {}
     nodes = store.list_nodes(cid)
+    live = [n for n in nodes if n.get("status") != "superseded"]
+    group_facts, withheld = _facts_for_prompt(
+        all_facts,
+        " ".join([
+            str(challenge.get("charter", {}).get("outcome", "")),
+            " ".join(str(c) for c in (challenge.get("charter", {}).get("constraints") or [])),
+            " ".join(str(n.get("label", "")) for n in live),
+        ]),
+    )
     return {
         "status": "ok",
         "challenge_id": cid,
         "charter": challenge.get("charter", {}),
         # Superseded nodes are excluded: they belong to a plan that no longer exists,
         # and handing one to a teammate is the fastest way to look inattentive.
-        "nodes": [n for n in nodes if n.get("status") != "superseded"],
+        "nodes": live,
         "tools": [{"node_id": t.get("node_id"), "name": t.get("name"), "type": t.get("type")}
                   for t in store.list_tools(cid)],
         "group_facts": group_facts,
+        **_withheld_note(withheld),
         "recent_journal": [
             {"actor": j.get("actor"), "kind": j.get("kind"), "text": j.get("text")}
             for j in store.list_journal(cid)[-12:]
         ],
         "tool_feedback": _tool_feedback(cid),
+    }
+
+
+def _facts_for_prompt(facts: list[str], about: str) -> tuple[list[str], int]:
+    """The group's facts, trimmed to a budget. Returns (kept, withheld_count).
+
+    Under the budget nothing changes at all -- no ranking, no reordering, same list in
+    the same order. That matters: every live check and every recorded demo was measured
+    against the unranked behaviour, and quietly re-sorting a party's memory to prove a
+    scaling story would invalidate all of them for no benefit to anyone.
+
+    Over the budget, keep the newest `GROUP_FACT_RECENT` unconditionally, then fill the
+    rest by content-word overlap with the goal and the live node labels. Ties go to the
+    more recent fact. Original order is restored at the end, because a teammate reading
+    the journal and a model reading this should see the same story in the same order.
+
+    This is a lexical score, not an understanding of relevance, and it will sometimes
+    drop the right fact. That is why the caller is told how many were withheld and the
+    prompt is told to say so out loud rather than presenting a trimmed list as
+    everything the group knows.
+    """
+    if len(facts) <= GROUP_FACT_BUDGET:
+        return list(facts), 0
+
+    wanted = _content_words(about or "")
+    recent_from = len(facts) - GROUP_FACT_RECENT
+    scored = []
+    for i, fact in enumerate(facts):
+        if i >= recent_from:
+            continue
+        overlap = len(wanted & _content_words(fact)) if wanted else 0
+        scored.append((overlap, i))
+    scored.sort(key=lambda pair: (-pair[0], -pair[1]))
+
+    room = max(0, GROUP_FACT_BUDGET - GROUP_FACT_RECENT)
+    keep = {i for i in range(recent_from, len(facts))}
+    keep |= {i for _, i in scored[:room]}
+    return [facts[i] for i in sorted(keep)], len(facts) - len(keep)
+
+
+def _withheld_note(withheld: int) -> dict[str, Any]:
+    """Say out loud that the list is partial. Silence here would be a lie by omission.
+
+    A model handed 40 of 96 facts with no marker will answer "is that everything the
+    team knows?" with yes, in good faith, because nothing told it otherwise.
+    """
+    if not withheld:
+        return {}
+    return {
+        "group_facts_withheld": withheld,
+        "group_facts_note": (
+            f"{withheld} older group facts were not included -- this list is the most "
+            f"recent and the most relevant to this goal, not everything the party "
+            f"knows. If the user asks about something you cannot see here, say the "
+            f"team may know more rather than saying it is unknown."
+        ),
     }
 
 

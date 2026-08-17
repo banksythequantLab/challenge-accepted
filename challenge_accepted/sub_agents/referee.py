@@ -23,7 +23,12 @@ from google.adk.agents import LlmAgent
 from google.adk.tools.agent_tool import AgentTool
 
 from .. import config, prompts
-from ..services.tools import complete_node, read_challenge_state, record_feedback
+from ..services.tools import (
+    complete_node,
+    read_challenge_state,
+    record_feedback,
+    write_journal,
+)
 
 referee = LlmAgent(
     name="referee",
@@ -40,7 +45,10 @@ referee = LlmAgent(
     # It still behaves as a single shot here -- it has no parent to transfer to, and it
     # returns its text as the tool result.
     mode="chat",
-    tools=[read_challenge_state, complete_node, record_feedback],
+    # `write_journal` was missing here for most of the build, and its absence was
+    # invisible: the Referee held every tool it needed to SAY no and none to RECORD
+    # having said it. A refused node looks identical to an untouched one.
+    tools=[read_challenge_state, complete_node, record_feedback, write_journal],
 )
 
 #: Give this to the Coach, not the Warden.

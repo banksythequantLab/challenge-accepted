@@ -35,6 +35,23 @@ def test_referee_is_a_coach_tool_not_a_warden_sibling():
     assert "referee" in [t.agent.name for t in _agent_tools(coach)]
 
 
+def test_the_referee_can_record_the_refusals_it_makes():
+    """A NOT_MET leaves no other mark anywhere in the system.
+
+    COMPLETE closes a node and the graph shows it. NOT_MET changes nothing visible --
+    the node stays exactly as it was -- so unless the Referee writes it down, a
+    teammate opening the challenge tomorrow sees a step nobody has touched when the
+    truth is it was attempted twice and refused for the same missing number both
+    times. For most of this build the Referee held every tool it needed to SAY no and
+    none to record having said it, and nothing here noticed because a missing journal
+    entry looks exactly like a step nobody tried.
+    """
+    from challenge_accepted.sub_agents.referee import referee
+
+    names = [getattr(t, "name", getattr(t, "__name__", "")) for t in referee.tools]
+    assert "write_journal" in names, f"the Referee cannot journal anything: {names}"
+
+
 def test_task_mode_agents_have_no_sub_agents():
     """ADK requires task-mode agents to be leaves."""
     def walk(agent):

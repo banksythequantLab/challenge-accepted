@@ -240,6 +240,24 @@ class Store:
             self._put("groups", group_id, existing)
         return members
 
+    def leave_group(self, group_id: str, user_id: str) -> list[str]:
+        """Take a user off the party roster. Idempotent. Returns the new roster.
+
+        The facts they contributed stay. That is deliberate and it is the only defensible
+        choice: shared memory is the point of a party, a teammate leaving does not make
+        what they discovered untrue, and unpicking it would silently rewrite everyone
+        else's plan. What leaving revokes is ACCESS -- `_mine()` reads this list, so the
+        challenge disappears from their quest picker and every read 403s from here on.
+        """
+        existing = self.get("groups", group_id)
+        if not existing:
+            return []
+        members = [m for m in (existing.get("members") or []) if m != user_id]
+        if len(members) != len(existing.get("members") or []):
+            existing["members"] = members
+            self._put("groups", group_id, existing)
+        return members
+
     def add_group_fact(self, group_id: str, fact: str) -> bool:
         """Goal-scoped shared memory. This is the group-intelligence primitive.
 
