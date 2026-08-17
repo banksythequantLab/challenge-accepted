@@ -171,7 +171,25 @@ def auth_config() -> dict[str, Any]:
 
 @router.get("/me")
 def me(caller: auth.Caller = Depends(current)) -> dict[str, Any]:
-    """Who the server thinks you are. The UI renders this, so a wrong answer is loud."""
+    """Who the server thinks you are. The UI renders this, so a wrong answer is loud.
+
+    It also writes the profile, which is not decoration. Profiles were only ever
+    written on `POST .../join`, and the person who STARTS a quest never joins it --
+    `save_charter` puts them on the roster server-side and the browser is told not to
+    auto-join under auth. So the owner had no user document, `_party()` fell back to
+    `uid[:8]`, and the founder of a quest appeared on their own party roster as eight
+    characters of their user id while everyone who arrived by invite link had a name
+    and an avatar. It is the one screen the collaborative claim rests on.
+
+    Conditional: a read and a compare before any write, so this does not become a
+    Firestore write on every page load. `put_user` merges, so a thinner token later
+    cannot blank a name.
+    """
+    if auth.required() and caller.uid:
+        known = store.get("users", caller.uid) or {}
+        fresh = {"name": caller.display, "email": caller.email, "picture": caller.picture}
+        if any(v and known.get(k) != v for k, v in fresh.items()):
+            store.put_user(caller.uid, fresh)
     return {"uid": caller.uid, "name": caller.display, "email": caller.email,
             "picture": caller.picture, "auth": auth.AUTH_MODE}
 

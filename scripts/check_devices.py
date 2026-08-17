@@ -175,6 +175,45 @@ def _check(page, label, vw, vh, touch: bool) -> list[str]:
     if clipped:
         bad.append(f"{label}: text cut off by its own box -- {clipped}")
 
+    # Every side pane, not just the one that happens to be open.
+    #
+    # This only ever measured the default tab, which meant a control could ship
+    # hanging off a 320px screen as long as it lived behind Quest, Journal or Party.
+    # The party leave/remove buttons landed in exactly that blind spot -- proven at
+    # 1440 by check_party_exit_ui.py and measured nowhere narrower.
+    seen = {}
+    for pane in ("quest", "journal", "facts"):
+        page.click(f"[data-p='{pane}']")
+        page.wait_for_timeout(250)
+        measured, off = page.evaluate(
+            """() => {
+                 const out = [];
+                 let n = 0;
+                 for (const el of document.querySelectorAll('.pane.on button, .pane.on a')) {
+                   const r = el.getBoundingClientRect();
+                   if (!r.width) continue;
+                   n++;
+                   if (r.right > window.innerWidth + 1 || r.left < -1)
+                     out.push('offscreen ' + el.textContent.trim().slice(0, 24));
+                   // 32px is the floor a previous run of this check established, after
+                   // a 28px theme toggle shipped and nothing noticed.
+                   if (r.height < 32 && el.offsetParent !== null)
+                     out.push('tap target ' + Math.round(r.height) + 'px: '
+                              + el.textContent.trim().slice(0, 24));
+                 }
+                 return [n, out];
+               }""")
+        seen[pane] = measured
+        if off:
+            bad.append(f"{label}: {pane} pane -- {off}")
+    # Printed because a pane with nothing in it passes every assertion above by having
+    # nothing to measure, and reads identically to a pane that was checked. If `facts`
+    # says 1 you are looking at Invite alone and the leave/remove controls did not
+    # render -- which means this run said nothing about them.
+    _p(f"    pane controls: " + ", ".join(f"{k} {v}" for k, v in seen.items()))
+    page.click("[data-p='chat']")
+    page.wait_for_timeout(200)
+
     # Nothing may hang off the bottom or the right of the viewport.
     spill = page.evaluate(
         """() => {

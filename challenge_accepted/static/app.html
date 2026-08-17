@@ -1844,6 +1844,13 @@ async function startAuth() {
       $('signout').hidden = false;
       $('who').hidden = false;
       gate.hidden = true;
+      //: Announce ourselves so the server can store the name and avatar Google gave
+      //: us. Profiles used to be written only on `join`, and the person who STARTS a
+      //: quest never joins it -- so the founder appeared on their own party roster as
+      //: eight characters of their user id while every teammate had a face. Not
+      //: awaited: the roster catching up one poll later is invisible, and blocking
+      //: the gate on it would not be.
+      api('/me').catch(() => {});
       resolve();
     });
   });
