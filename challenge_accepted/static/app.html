@@ -1334,6 +1334,43 @@ function toolAsText(t) {
   return parts.join('\n');
 }
 
+//: A sandboxed iframe with no `allow-same-origin` has no storage, and merely READING
+//: `localStorage` throws `Access is denied` -- at the top of the script, so the whole
+//: page renders blank. A live tracker shipped exactly like that: every static check
+//: said it was a runnable HTML tool, and the user got a white rectangle.
+//:
+//: The Toolwright is now told not to touch storage. This is the other half, and it is
+//: the half that covers every tool built BEFORE it was told. An in-memory stub is a
+//: strictly better failure than a blank page: the tool works for the session and
+//: forgets afterwards, which is what a sandboxed page could ever honestly offer.
+//:
+//: Loosening the sandbox instead was never an option -- `allow-same-origin` would hand
+//: model-written JavaScript the dashboard's own origin, its session and its token.
+const STORAGE_SHIM = `<script>(function(){
+  try { window.localStorage.getItem('x'); return; } catch (e) {}
+  var mk = function(){ var m = {};
+    return { getItem: function(k){ return k in m ? m[k] : null; },
+             setItem: function(k, v){ m[k] = String(v); },
+             removeItem: function(k){ delete m[k]; },
+             clear: function(){ m = {}; },
+             key: function(i){ return Object.keys(m)[i] || null; },
+             get length(){ return Object.keys(m).length; } }; };
+  try { Object.defineProperty(window, 'localStorage', { value: mk(), configurable: true }); } catch (e) {}
+  try { Object.defineProperty(window, 'sessionStorage', { value: mk(), configurable: true }); } catch (e) {}
+})();<\/script>`;
+
+function withStorageShim(doc) {
+  // Ahead of anything the page runs, and still inside <head> so it does not land
+  // before the doctype and drop the document into quirks mode.
+  const head = doc.match(/<head[^>]*>/i);
+  if (head) return doc.replace(head[0], head[0] + STORAGE_SHIM);
+  const html = doc.match(/<html[^>]*>/i);
+  if (html) return doc.replace(html[0], html[0] + '<head>' + STORAGE_SHIM + '</head>');
+  const dt = doc.match(/<!doctype html>/i);
+  if (dt) return doc.replace(dt[0], dt[0] + STORAGE_SHIM);
+  return STORAGE_SHIM + doc;
+}
+
 function renderTool(t) {
   const stage = $('m-stage');
   const src = t.source || '';
@@ -1360,10 +1397,10 @@ function renderTool(t) {
     const f = document.createElement('iframe');
     f.id = 'frame';
     f.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
-    f.srcdoc = looksHTML(src)
+    f.srcdoc = withStorageShim(looksHTML(src)
       ? src
       : '<!doctype html><meta charset="utf-8">' +
-        '<style>body{font:14px system-ui,sans-serif;margin:16px;color:#111}</style>' + src;
+        '<style>body{font:14px system-ui,sans-serif;margin:16px;color:#111}</style>' + src);
     stage.appendChild(f);
     return;
   }

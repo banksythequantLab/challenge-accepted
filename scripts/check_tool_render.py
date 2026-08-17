@@ -52,6 +52,53 @@ HAS_MARKUP = re.compile(r"<[a-z][\s\S]*>", re.I)
 #: a bare fragment in a minimal document if that is all the model produced.
 RUNNABLE = ("mini_app", "calculator", "tracker", "drill")
 
+APP_HTML = Path(__file__).resolve().parent.parent / "challenge_accepted" / "static" / "app.html"
+
+#: The tool page is loaded into a REAL sandboxed iframe with the same flags app.html
+#: uses, not into a bare Playwright page.
+#:
+#: The first version of this used `page.set_content` plus `add_init_script` to fake the
+#: sandbox, and `add_init_script` does not apply to `set_content` -- it only runs on
+#: navigation -- so the shim never executed and a tool that works in the product was
+#: reported as broken. Simulating an environment is how a check ends up measuring its
+#: own simulation. Use the environment.
+HOST_PAGE = ("<!doctype html><meta charset='utf-8'><body style='margin:0'>"
+             "<iframe id='f' style='width:100%;height:600px;border:0' "
+             "sandbox='allow-scripts allow-forms allow-modals'></iframe>")
+
+
+def _shim_from_app_html() -> str:
+    """app.html's own storage stub, read out of the file rather than copied.
+
+    Two copies of this would be two things to keep in step, and the copy in the check
+    is the one nobody would notice going stale -- it would quietly start measuring a
+    shim the product no longer has. Read the real one; fail loudly if it moves.
+    """
+    text = APP_HTML.read_text(encoding="utf-8")
+    m = re.search(r"const STORAGE_SHIM = `(<script>[\s\S]*?)<\\/script>`;", text)
+    if not m:
+        raise SystemExit(
+            "could not find STORAGE_SHIM in app.html -- this check reproduces the "
+            "product's own stub and will not guess at it")
+    return m.group(1) + "</script>"
+
+
+STORAGE_SHIM = _shim_from_app_html()
+
+
+def with_shim(doc: str) -> str:
+    """app.html's `withStorageShim`, in Python. Head first, so it beats page scripts."""
+    head = re.search(r"<head[^>]*>", doc, re.I)
+    if head:
+        return doc.replace(head.group(0), head.group(0) + STORAGE_SHIM, 1)
+    html = re.search(r"<html[^>]*>", doc, re.I)
+    if html:
+        return doc.replace(html.group(0), html.group(0) + "<head>" + STORAGE_SHIM + "</head>", 1)
+    dt = re.search(r"<!doctype html>", doc, re.I)
+    if dt:
+        return doc.replace(dt.group(0), dt.group(0) + STORAGE_SHIM, 1)
+    return STORAGE_SHIM + doc
+
 #: app.html's `checklistItems`: parse JSON, take the first array under a known key
 #: (falling back to the first array-valued key at all), and keep entries with text.
 ITEM_KEYS = ("items", "steps", "checklist", "tasks", "list")
@@ -220,13 +267,25 @@ def live_check(tools: list[dict]) -> int:
             src = t.get("source") or ""
             if not LOOKS_HTML.search(src):
                 src = "<!doctype html><meta charset='utf-8'>" + src
-            page.set_content(src, wait_until="load")
-            page.wait_for_timeout(400)
-            smoke = page.locator("[data-smoke]")
+            page.set_content(HOST_PAGE, wait_until="load")
+            # srcdoc is set from JS rather than written into the attribute, so nothing
+            # here has to get HTML-escaping of the tool's own markup right.
+            page.evaluate("d => { document.getElementById('f').srcdoc = d; }",
+                          with_shim(src))
+            page.wait_for_timeout(600)
+            frame = page.frame_locator("#f")
+            smoke = frame.locator("[data-smoke]")
             shown = smoke.first.inner_text().strip() if smoke.count() else ""
-            body = (page.locator("body").inner_text() or "").strip()
+            body = (frame.locator("body").inner_text() or "").strip()
             name = (t.get("name") or "")[:40]
-            _p(f"  {name:<42} smoke={shown[:44]!r:<46} errors={len(errors)}")
+            leans = "storage" if re.search(r"\b(local|session)Storage\b", src) else ""
+            _p(f"  {name:<42} smoke={shown[:40]!r:<42} errors={len(errors)} {leans}")
+            if leans:
+                # Not a failure: the shim carries it and the tool works. But the page
+                # believes it is saving the user's data and it is not, so say so
+                # rather than letting a silent stub pass for persistence.
+                _p("      ^ uses browser storage; the shim keeps it in memory, so "
+                   "anything it 'saves' is gone when the modal closes")
             if errors:
                 bad.append(f"{name}: threw on load -- {errors[0][:120]}")
             elif not body:

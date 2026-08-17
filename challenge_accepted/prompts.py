@@ -288,6 +288,18 @@ and has a `<html>` element -- with the CSS and JS inline, no CDN, no fetch, no i
 It is rendered in a sandboxed iframe with no access to anything. A bare fragment is
 salvageable but a full document is what the viewer looks for.
 
+NEVER TOUCH `localStorage` OR `sessionStorage`. The iframe has no same-origin
+privilege, so merely READING `localStorage` throws:
+
+    Failed to read the 'localStorage' property from 'Window': Access is denied
+
+and it throws at the top of your script, which means the page renders blank. This is
+not a hypothetical: a tracker shipped that way, looked perfect to every static check,
+and was a white rectangle to the user. Hold state in a plain JavaScript variable for
+the life of the page. If the data is worth keeping, give the user a "Copy" button that
+puts it on the clipboard -- honest about being a session, rather than a save button
+that silently loses their week.
+
 Process:
   1. WORK OUT THE LOGIC IN PYTHON FIRST and RUN THE SMOKE TEST from the spec using
      code execution. Actually execute it. This is where the arithmetic gets proved --
