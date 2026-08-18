@@ -48,9 +48,16 @@ def main() -> int:
     if a.severity:
         parts.append(f"severity>={a.severity}")
 
+    # `x-goog-user-project` is not optional here, it just fails slowly without it.
+    # A user-credential token with no quota project bills reads to Google's shared
+    # default project (number 764086051850), whose per-minute read quota is exhausted
+    # by everyone on earth. The symptom is a 429 naming a project number that is not
+    # yours, in the middle of debugging something else -- which is how this cost an
+    # hour once. Charge the reads to the project whose logs they are.
     r = requests.post(
         "https://logging.googleapis.com/v2/entries:list",
         headers={"Authorization": f"Bearer {creds.token}",
+                 "x-goog-user-project": PROJECT,
                  "Content-Type": "application/json"},
         json={"resourceNames": [f"projects/{PROJECT}"],
               "filter": " AND ".join(parts),

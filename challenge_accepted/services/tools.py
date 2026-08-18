@@ -168,6 +168,33 @@ async def save_charter(
     }
     user_id = str(tool_context.state.get("user_id", "anon"))
     group_id = _group_id(tool_context)
+
+    # A SECOND call updates the quest. It does not mint a rival one.
+    #
+    # Measured on production: one FORGE run produced two challenges four minutes
+    # apart, same title, and the second was empty. The turn had failed mid-flight, the
+    # Warden recovered by re-running the ACCEPT phase, and `save_charter` -- which had
+    # only ever known how to create -- made a new challenge and pointed session state
+    # at it. Everything already built stayed on the first one: twelve nodes, six tools,
+    # every journal entry, all orphaned and invisible. The check reported "0 tools
+    # built. This is the money shot." and it was wrong about which thing had broken.
+    #
+    # The instruction says "call this exactly once", and an instruction is not a
+    # constraint. Anything a model can do twice, it eventually will -- on a retry,
+    # after a crash, or because the user changed their mind halfway through. Losing a
+    # challenge's entire contents is a bad outcome for a duplicate function call.
+    existing = str(tool_context.state.get("challenge_id") or "")
+    if existing and store.get("challenges", existing):
+        store._patch("challenges", existing, {"charter": charter})
+        store.add_journal(existing, {
+            "actor": "Interviewer", "kind": "decision",
+            "text": f"Charter updated: {outcome}"})
+        tool_context.state["charter"] = charter
+        return {"status": "updated", "challenge_id": existing,
+                "note": "This challenge already existed, so its charter was updated "
+                        "rather than a second one being created. Everything already "
+                        "built for it is still attached."}
+
     cid = store.create_challenge(charter, owner_id=user_id, group_id=group_id)
 
     tool_context.state["challenge_id"] = cid

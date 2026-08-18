@@ -58,7 +58,7 @@ def test_ids_are_stripped_in_vertex_mode(monkeypatch):
     forge = _reload(monkeypatch, vertex=True)
     try:
         req = _Req(_history_with_ids())
-        forge._strip_code_ids(None, req)
+        forge._prepare_worker_request(None, req)
         assert req.contents[0].parts[0].executable_code.id is None
         assert req.contents[1].parts[0].code_execution_result.id is None
         assert req.contents[0].parts[0].executable_code.code == "print(1)", "code kept"
@@ -73,13 +73,13 @@ def test_ids_are_left_alone_on_the_developer_api(monkeypatch):
     that has always worked."""
     forge = _reload(monkeypatch, vertex=False)
     req = _Req(_history_with_ids())
-    forge._strip_code_ids(None, req)
+    forge._prepare_worker_request(None, req)
     assert req.contents[0].parts[0].executable_code.id == "ec_abc123"
     assert req.contents[1].parts[0].code_execution_result.id == "cer_def456"
 
 
 def test_google_genai_still_rejects_these_ids():
-    """The reason `_strip_code_ids` exists. Drive the real converters.
+    """The reason `_prepare_worker_request` exists. Drive the real converters.
 
     If a future google-genai stops raising, this fails and the stripping becomes
     optional. If it starts raising on a *third* field, the round-trip test below is
@@ -106,7 +106,7 @@ def test_a_stripped_history_survives_the_real_vertex_converter(monkeypatch):
     forge = _reload(monkeypatch, vertex=True)
     try:
         req = _Req(_history_with_ids())
-        forge._strip_code_ids(None, req)
+        forge._prepare_worker_request(None, req)
         for content in req.contents:
             for part in content.parts:
                 models._Part_to_vertex(part)  # raises if anything illegal survived

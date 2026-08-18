@@ -149,8 +149,28 @@ def _build_key(callback_context) -> str:
             f"{getattr(callback_context, 'agent_name', '?')}")
 
 
-def _strip_code_ids(callback_context, llm_request):
-    """Remove the `id` Vertex refuses to accept back on code parts.
+def _prepare_worker_request(callback_context, llm_request):
+    """Everything that has to happen to a worker's request before the model sees it.
+
+    THREE jobs under one name, and the name used to be `_strip_code_ids`, which named
+    only the third. That is not a cosmetic complaint: reading the name, the obvious
+    conclusion is that this duplicates `vertex_compat.install()` -- which guards the
+    whole agent tree against the same crash -- and should be deleted. It does overlap,
+    deliberately, and deleting it would take the OTHER two jobs with it and silently
+    restore a different outage.
+
+      1. trace what the model is actually being asked (FORGE_DEBUG only);
+      2. clear contents carried over from a previous LOOP ITERATION, which
+         `include_contents="none"` does not do and which made workers idle;
+      3. strip the code-part `id` Vertex rejects.
+
+    Job 3 belt-and-braces with `vertex_compat` on purpose. That bug killed FORGE on
+    every deployed revision for weeks, came back once after being fixed, and is
+    invisible from outside -- a phase that builds one of seven tools renders exactly
+    like a phase that only needed one. Two guards on that specific failure is a
+    deliberate choice, not an oversight.
+
+    --- job 3, in detail ---
 
     The bug this fixes killed FORGE on every deployed revision, and it hid behind the
     first one. A Toolwright's first model call succeeds and comes back with an
@@ -238,7 +258,7 @@ def _saw_its_slot(index: int):
     """
 
     def _cb(callback_context):
-        # Not debug-only: this is what tells `_strip_code_ids` that a fresh build has
+        # Not debug-only: this is what tells `_prepare_worker_request` that a fresh build has
         # begun, and therefore that any accumulated contents belong to a previous
         # iteration and must go.
         _CALLS_THIS_BUILD[_build_key(callback_context)] = 0
@@ -319,8 +339,8 @@ def _worker(index: int) -> LlmAgent:
         before_agent_callback=_saw_its_slot(index),
         after_agent_callback=_finished(index),
         # Runs on EVERY model call, including the second one inside a single build --
-        # which is the one that was killing the phase. See `_strip_code_ids`.
-        before_model_callback=_strip_code_ids,
+        # which is the one that was killing the phase. See `_prepare_worker_request`.
+        before_model_callback=_prepare_worker_request,
     )
 
 

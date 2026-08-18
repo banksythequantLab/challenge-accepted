@@ -208,6 +208,26 @@ def main(base: str) -> int:
     specs = _specs_from_state(session.get("state") if isinstance(session, dict) else {})
 
     cid = (session.get("state") or {}).get("challenge_id") if isinstance(session, dict) else None
+
+    # Is session state even pointing at the challenge the work went into?
+    #
+    # It once was not, and this check said "the deployed service built nothing. This is
+    # the money shot." FORGE had in fact built six tools perfectly -- on a challenge
+    # created four minutes earlier. The turn had failed mid-flight, ACCEPT re-ran, and
+    # `save_charter` minted a SECOND challenge and repointed state at it, orphaning
+    # everything. Every number this check printed was true and the conclusion was
+    # wrong, which is the most expensive kind of wrong a check can be.
+    mine = _json(f"{base}/api/challenges", timeout=60)
+    mine = mine.get("challenges", mine) if isinstance(mine, dict) else mine
+    if isinstance(mine, list) and len(mine) > 1:
+        print(f"\n!!! this run created {len(mine)} challenges, not one:")
+        for row in mine:
+            print(f"      {row.get('id')}  {row.get('created_at','')[:19]}  "
+                  f"{(row.get('title') or '')[:46]}")
+        print("    Session state points at the LAST one. If the tool count below is "
+              "zero,\n    look there first: a duplicate charter orphans everything "
+              "already built.")
+
     tools = []
     if cid:
         dash = _json(f"{base}/api/challenges/{cid}/dashboard", timeout=60)
