@@ -30,7 +30,7 @@ service broke.
 |---|---|
 | Verified **locally** | 8-turn interview -> charter saved -> 12-node DAG -> 6 tools built, smoke-tested and persisted. This row said *Verified live* for weeks and was wrong: it was only ever true against a local server on a `GOOGLE_API_KEY`. On the deployed service every Toolwright was dying. See Known issues |
 | Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
-| Verified | **213** tests pass against a real ADK `Runner`, plus **34** checks in `scripts\check_*` that drive the actual controls; FastAPI boots, `/api/healthz` 200. All of them re-run against the current build after today's deploys -- not carried over from a green run last week. That count was stale at *137 tests, 18 live checks* for a while, which is a small lie of the same species as the auth row below |
+| Verified | **226** tests pass against a real ADK `Runner`, plus **34** checks in `scripts\check_*` that drive the actual controls; FastAPI boots, `/api/healthz` 200. All of them re-run against the current build after today's deploys -- not carried over from a green run last week. That count was stale at *137 tests, 18 live checks* for a while, which is a small lie of the same species as the auth row below |
 | Verified live | **The layout holds on seven viewports, on the deployed site.** `scripts\check_devices.py https://challengeaccepted.app`: Galaxy S9+ 320, iPhone 13 390, Pixel 7 412 (the first Android ever tested), iPad Mini 768, iPad landscape 1024, laptop 1280 and 1440 -- rendering a real challenge pulled from the live API. Three bugs found, the third by looking at the screenshots after every numeric assertion had passed. See Known issues |
 | Verified live | **Two people, one challenge, on the deployed service.** `scripts\check_party_live.py`: Dana joins with nothing but a challenge id and is told *"Cloud Run failed due to GCP admin and billing restrictions, so all hosting is strictly on Vercel"* -- Derek's discovery, which she had no other way to know -- then handed an open node by name. Her private group stays empty; the roster reads 2. This is the beat at 2:20 in the demo script, and until now it had only ever been proven against localhost |
 | Verified live *(and the number is measured, not chosen)* | **FORGE builds 7 of 7 again — at two concurrent workers, not four.** It had been building 1 of 6. Four live runs measured 6/6 (orphaned by a duplicate-charter bug, since fixed), 1/6, 3/7, 1/6, and `CA_FORGE_DEBUG=1` said what happened: all four workers start with four distinct real specs, all four reach the model with the spec in the prompt, then exactly one makes a second call while the other three vanish — with `after_agent_callback` firing for none of them, so they were torn down rather than idle. That is the signature of an exception inside the `asyncio.TaskGroup` ParallelAgent runs them in, where one failure cancels its siblings. Embeddings (`CA_EMBED=off`) and prompt size (1,833 chars vs 4,548) were each ruled out by experiment first; neither changed anything. Halving the batch did: **7 asked / 7 built, twice in a row** on revision 00050, every worker reaching END, the queue draining and the dispatcher escalating cleanly. Then **8 asked / 8 built on revision 00051** with `CA_FORGE_WORKERS` unset — the same result from the committed default rather than from an env var somebody has to remember to set. **The cause is still unidentified** — no `RESOURCE_EXHAUSTED`, no 429, and the ERROR logs carry only OpenTelemetry context-teardown noise, which is a symptom of the cancellation rather than its cause. So this is a floor that works, not a diagnosis, and `config.FORGE_WORKERS` says so. Cost: four batches instead of two, ~8.5 min instead of ~5. Coverage is unaffected — the loop reseeds until the queue drains |
@@ -276,6 +276,48 @@ checklist rather than blocking the graph.
 ---
 
 ## Known issues
+
+### OPEN: the turn runs one frame too deep, and whatever it starts dies with that frame
+
+This is the best lead on the two failures below, and it came from switching on a trace
+rather than from reading anything.
+
+`flow_debug.py` now logs every agent entry with its **branch**. The first live run with
+it on failed in a new way -- 5 specs, 2 tools -- and printed this:
+
+```
+[FORGE] worker 0: START slot='baseline-5k-time-trial'
+        branch=cartographer@call_636196.forge_workers.toolwright_0
+```
+
+Compare a healthy run: `branch=forge_workers.toolwright_0`. FORGE was running inside
+the **Cartographer's** frame.
+
+Why that can happen: a `mode="single_turn"` sub-agent is **not a transfer target**.
+ADK exposes it to its parent as a *tool* and runs it in an isolated sub-branch named
+`<agent>@call_<n>`. Cartographer is `single_turn`. The `[FLOW]` trace for the same run
+shows it calling `transfer_to_agent(warden)` from inside that sub-branch instead of
+simply returning its output:
+
+```
+[FLOW] enter cartographer   [FLOW] handoff -> warden   [FLOW] enter warden
+[FLOW] handoff -> forge     [FLOW] enter forge         [FLOW] enter quartermaster
+```
+
+So the Warden resumed **inside the Cartographer's tool call**, handed off to FORGE from
+there, and the whole FORGE loop ran under a frame that closes when the tool call does.
+It closed. Both workers made their second model call, neither reached
+`after_agent_callback`, the loop never dispatched a second batch, and there was no
+error anywhere -- the same signature that four concurrent workers produced, now at two.
+
+**This is one observation, not a diagnosis.** It is a log line (`DEEP:`) rather than a
+code change on purpose: two changes made on good reasoning and thin evidence made
+things measurably worse earlier in this project, and both were caught only by
+measuring afterwards. The next run either reproduces the correlation or kills it.
+
+If it holds, the candidate fix is `disallow_transfer_to_parent=True` on the
+single-turn sub-agents, so a tool-shaped agent returns instead of transferring. That is
+a control-flow change to the demo path and it is not going in on one data point.
 
 ### OPEN: one run in two stopped dead after the charter was saved
 

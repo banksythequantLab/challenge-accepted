@@ -12,7 +12,7 @@ from . import config, prompts
 from .services.memory import preload_memory
 from .services.store import store
 from .services.tools import read_challenge_state, remember_group_fact, write_journal
-from . import vertex_compat
+from . import flow_debug, vertex_compat
 from .sub_agents import archivist, cartographer, coach, forge, interviewer
 from .sub_agents.scout import scout_tool
 
@@ -86,5 +86,14 @@ root_agent = LlmAgent(
 #: Asserted, not assumed: a silent no-op here restores the bug exactly.
 _GUARDED = vertex_compat.install(root_agent)
 assert _GUARDED >= 6, f"the Vertex id guard reached only {_GUARDED} agents"
+
+#: Every agent entry, every tool call, and one summary line per turn saying which
+#: agents ran and which handoffs happened. Wired here rather than per-agent because
+#: the failure it exists for -- the Warden finishing a turn alone, having delegated to
+#: nobody -- is invisible from inside any single agent: each one behaved correctly,
+#: and the bug is which ones never ran. Asserted for the same reason as the guard
+#: above: a silent no-op leaves the next unreproducible failure exactly as unreadable.
+_TRACED = flow_debug.install(root_agent)
+assert _TRACED >= 6, f"the flow trace reached only {_TRACED} agents"
 
 __all__ = ["root_agent", "warden_instruction"]
