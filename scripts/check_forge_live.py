@@ -30,6 +30,7 @@ exactly that. It now mints a throwaway identity the same way the other live chec
 
 from __future__ import annotations
 
+import http.client
 import json
 import sys
 import time
@@ -46,6 +47,15 @@ DEFAULT_URL = "https://challengeaccepted.app"
 #: The signed-in identity everything below runs as. `None` on a deployment with auth
 #: off, which keeps this check usable against a local server.
 _UID: str | None = None
+
+#: Set when an SSE read came back short. FORGE can go two minutes between events while
+#: a Toolwright waits on the model, and a stream that quiet occasionally gets cut in
+#: the path -- observed once on revision 00051, with the server logs showing every
+#: worker reaching END minutes afterwards. The run does not stop when the client stops
+#: listening, so the final tally waits for the count to settle instead of measuring a
+#: build that is still going. Without this the check reports "specs never became a
+#: tool" for a fault that is entirely on the watching end.
+_TRUNCATED = False
 _TOKEN: tuple[float, str] = (0.0, "")
 
 
@@ -85,6 +95,23 @@ def _json(url, body=None, timeout=600):
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
             raw = r.read().decode("utf-8", "replace")
+    except http.client.IncompleteRead as e:
+        # The SSE stream died mid-run. FORGE goes minutes between events while a
+        # Toolwright waits on the model, and a stream that quiet is a stream something
+        # in the path can decide is finished. This is NOT the same failure as FORGE
+        # building nothing, and reporting it as one sent a previous run chasing the
+        # wrong bug: the server logs showed every worker reaching END afterwards.
+        #
+        # So: keep what arrived, say loudly that it was truncated, and let the tally at
+        # the end -- which reads the store, not the stream -- decide whether the run
+        # actually worked. A check that cannot tell "I stopped watching" from "it
+        # stopped working" is worse than no check.
+        global _TRUNCATED
+        _TRUNCATED = True
+        raw = e.partial.decode("utf-8", "replace")
+        print(f"\n  !! the event stream was cut after {len(e.partial)} bytes. "
+              f"The run continues on the server; the tool count below is read from "
+              f"the store, not from this stream.", flush=True)
     except urllib.error.HTTPError as e:
         # A 401/403 is the check failing to sign in, not FORGE failing to build. Say
         # which, out loud -- a silent auth failure here would look like an empty run.
@@ -196,6 +223,14 @@ def main(base: str) -> int:
         got = _say(base, user, sid, text)
         calls += got
         print(f"    {time.perf_counter() - t:5.0f}s  {len(got)} tool calls")
+        if _TRUNCATED:
+            # Do not send the next turn on top of a run that is still going. Two
+            # overlapping invocations on one session is a different experiment, and
+            # whatever it produced would be reported here as FORGE's behaviour.
+            print("    stopping the script here -- the previous turn is still running "
+                  "server-side and stacking another on top would measure something "
+                  "else entirely.")
+            break
 
     forge_calls = [c for c in calls if "toolwright" in c.lower()]
     print("\n--- what the workers did ---")
@@ -230,9 +265,22 @@ def main(base: str) -> int:
 
     tools = []
     if cid:
-        dash = _json(f"{base}/api/challenges/{cid}/dashboard", timeout=60)
-        raw = dash.get("tools")
-        tools = (raw.get("tools") if isinstance(raw, dict) else raw) or []
+        # If the stream was cut, the run did not stop -- so counting immediately would
+        # count a build still in progress and report a completeness failure that is
+        # really a stopwatch failure. Wait until the count stops moving.
+        settle = 0 if not _TRUNCATED else 6
+        seen = -1
+        while True:
+            dash = _json(f"{base}/api/challenges/{cid}/dashboard", timeout=60)
+            raw = dash.get("tools")
+            tools = (raw.get("tools") if isinstance(raw, dict) else raw) or []
+            if settle <= 0 or len(tools) == seen:
+                break
+            print(f"    ...stream was cut; {len(tools)} tools so far, waiting 45s "
+                  f"({settle} left)", flush=True)
+            seen = len(tools)
+            settle -= 1
+            time.sleep(45)
 
     wanted = [s for s in specs if s.get("needed") is not False]
     print(f"\nchallenge   : {cid}")
