@@ -151,32 +151,51 @@ def main() -> int:
             if not withheld:
                 bad.append(f"call #{i + 1} trimmed silently: no `group_facts_withheld`, "
                            "so the model believes it was told everything")
-            # Reported, NOT asserted, and the difference is the honest part.
+            # Asserted again, and the history of this one assertion is the whole story
+            # of the feature.
             #
-            # The first version failed the run when any of the party's real facts were
-            # evicted. That is asserting a guarantee the design cannot make: a fact
-            # with zero lexical overlap with the goal is indistinguishable from filler
-            # with zero overlap, and the tiebreak is recency, so an OLD real fact that
-            # happens to share no words with the charter will lose to newer noise.
-            # Every bounded window has that property. Pretending otherwise would mean
-            # writing a check that only passes when the ranking gets lucky.
+            # v1 failed the run when any real fact was evicted. That was asserting a
+            # guarantee the LEXICAL design could not make: a fact sharing no words with
+            # the charter was indistinguishable from filler sharing none, and recency
+            # broke the tie in filler's favour. It measured 3 of 4 and the assertion
+            # had to be downgraded to a report, because a check that only passes when
+            # the ranking gets lucky is worse than no check.
             #
-            # What IS guaranteed is that the model is told the list is partial, which
-            # is the assertion above -- and that is why `group_facts_note` tells it to
-            # say "the team may know more" rather than "unknown".
+            # v2 added embeddings and got WORSE -- 2 of 4 -- because it mixed cosine
+            # scores with a rescaled word-overlap in one sort, and unrelated text
+            # embeds at ~0.66, not ~0. The report is what caught that; an assertion
+            # would only have said "still not guaranteed".
+            #
+            # v3 ranks on one scale and backfills the vectors, and this is a real bar
+            # again: with every fact embedded, the party's own discoveries outranking
+            # machine-generated gibberish is something the design DOES promise.
             real_kept = [f for f in facts if MARK not in str(f)]
-            _p(f"  real facts survived : {len(real_kept)} of {len(before)}"
-               f"{'   <- see the note above; not a guarantee' if len(real_kept) < len(before) else ''}")
+            _p(f"  real facts survived : {len(real_kept)} of {len(before)}")
+            if before and len(real_kept) < len(before) and fillers:
+                bad.append(
+                    f"call #{i + 1} kept {fillers} pieces of filler while dropping "
+                    f"{len(before) - len(real_kept)} of the party's real discoveries. "
+                    "Every fact here is embedded, so this is the ranking being wrong "
+                    "rather than the ranking being unable to tell")
             newest = [f for f in seeded_order[-3:] if f not in facts]
             if newest:
                 bad.append(f"call #{i + 1} dropped {len(newest)} of the three NEWEST "
                            "facts -- recency is supposed to be unconditional")
     finally:
+        # Trim BOTH lists, index by index. The first version dropped the filler from
+        # `shared_facts` and left `fact_vectors` at 60, so the group carried 60 vectors
+        # against 4 facts -- an alignment the ranker depends on, broken by the cleanup
+        # of the check that measures the ranker. Rebuild the pair together.
         doc = store.get("groups", gid) or {}
-        kept = [f for f in (doc.get("shared_facts") or []) if MARK not in str(f)]
-        doc["shared_facts"] = kept
+        old_facts = list(doc.get("shared_facts") or [])
+        old_vecs = list(doc.get("fact_vectors") or [])
+        pairs = [(f, old_vecs[i] if i < len(old_vecs) else {})
+                 for i, f in enumerate(old_facts) if MARK not in str(f)]
+        doc["shared_facts"] = [f for f, _ in pairs]
+        doc["fact_vectors"] = [v for _, v in pairs]
         store._put("groups", gid, doc)
-        _p(f"\ncleaned up: group back to {len(kept)} facts")
+        _p(f"\ncleaned up: group back to {len(pairs)} facts "
+           f"({len([1 for _, v in pairs if (v or {}).get('v')])} vectored)")
 
     if bad:
         _p("\n--- problems ---")

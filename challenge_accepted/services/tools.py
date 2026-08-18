@@ -17,7 +17,7 @@ from typing import Any, Optional
 
 from google.adk.tools import ToolContext
 
-from . import memory
+from . import embeddings, memory
 from .store import _content_words, store
 
 PENDING_JOURNAL = "journal.pending"
@@ -334,6 +334,25 @@ def remember_group_fact(fact: str, tool_context: ToolContext) -> dict[str, Any]:
     otherwise have to rediscover -- an office that only takes Tuesday appointments,
     a vendor that never replies, a constraint the owner mentioned in passing.
 
+    EVERYONE ON THE PARTY READS THIS, INCLUDING PEOPLE WHO HAVE NOT JOINED YET.
+
+    A party grows by invite link. What you write here is shown to the next person who
+    arrives, and to the one after that, and it cannot be unsaid -- a teammate leaving
+    does not take their facts with them. So the test is not "is this true", it is
+    "would the person who told me this expect the whole team to see it".
+
+    Record: constraints, deadlines, things tried and ruled out, how an external party
+    actually behaves, a decision and its reason.
+
+    Do NOT record: anything about health, money, relationships, employment or mood
+    that the user mentioned to explain themselves rather than to inform the plan.
+    "Training four evenings a week" belongs here. "Going through a divorce, which is
+    why evenings are hard" does not -- the constraint is the evenings. Strip the
+    reason and keep the shape of the work.
+
+    When a fact is only useful to the person who told you, it is not a group fact.
+    Say it back to them instead.
+
     Args:
         fact: One sentence, stated as a durable fact rather than a moment in time.
 
@@ -374,9 +393,13 @@ def read_challenge_state(tool_context: ToolContext) -> dict[str, Any]:
         A dict with status, charter, nodes, tools, group_facts, recent_journal and
         tool_feedback.
     """
-    all_facts = (store.get("groups", _group_id(tool_context)) or {}).get("shared_facts", [])
+    gid = _group_id(tool_context)
+    all_facts = (store.get("groups", gid) or {}).get("shared_facts", [])
     cid = _challenge_id(tool_context)
     if not cid:
+        # No charter yet, so nothing to rank against. Recency alone decides, which is
+        # the right answer when the only thing we know about the user is that they are
+        # about to tell us something.
         group_facts, withheld = _facts_for_prompt(all_facts, "")
         return {
             "status": "no_challenge",
@@ -390,13 +413,22 @@ def read_challenge_state(tool_context: ToolContext) -> dict[str, Any]:
     challenge = store.get("challenges", cid) or {}
     nodes = store.list_nodes(cid)
     live = [n for n in nodes if n.get("status") != "superseded"]
+    # What this challenge is ABOUT, in one string: the outcome, its constraints, and
+    # the steps still open. Node labels are in there deliberately -- what a teammate
+    # needs to be reminded of depends on what is still to do, not only on the goal.
+    about = " ".join([
+        str(challenge.get("charter", {}).get("outcome", "")),
+        " ".join(str(c) for c in (challenge.get("charter", {}).get("constraints") or [])),
+        " ".join(str(n.get("label", "")) for n in live),
+    ])
+    # Both lookups are free when the party is under budget, and `_facts_for_prompt`
+    # returns before touching either -- but they are cheap regardless: the vectors are
+    # already in the group document we just read, and the goal vector is cached on the
+    # challenge until its text changes.
     group_facts, withheld = _facts_for_prompt(
-        all_facts,
-        " ".join([
-            str(challenge.get("charter", {}).get("outcome", "")),
-            " ".join(str(c) for c in (challenge.get("charter", {}).get("constraints") or [])),
-            " ".join(str(n.get("label", "")) for n in live),
-        ]),
+        all_facts, about,
+        vectors=store.fact_vectors(gid) if len(all_facts) > GROUP_FACT_BUDGET else None,
+        goal_vector=store.goal_vector(cid, about) if len(all_facts) > GROUP_FACT_BUDGET else None,
     )
     return {
         "status": "ok",
@@ -417,7 +449,9 @@ def read_challenge_state(tool_context: ToolContext) -> dict[str, Any]:
     }
 
 
-def _facts_for_prompt(facts: list[str], about: str) -> tuple[list[str], int]:
+def _facts_for_prompt(facts: list[str], about: str,
+                      vectors: Optional[list] = None,
+                      goal_vector: Optional[list[float]] = None) -> tuple[list[str], int]:
     """The group's facts, trimmed to a budget. Returns (kept, withheld_count).
 
     Under the budget nothing changes at all -- no ranking, no reordering, same list in
@@ -426,31 +460,68 @@ def _facts_for_prompt(facts: list[str], about: str) -> tuple[list[str], int]:
     scaling story would invalidate all of them for no benefit to anyone.
 
     Over the budget, keep the newest `GROUP_FACT_RECENT` unconditionally, then fill the
-    rest by content-word overlap with the goal and the live node labels. Ties go to the
-    more recent fact. Original order is restored at the end, because a teammate reading
-    the journal and a model reading this should see the same story in the same order.
+    rest by relevance to the goal. Ties go to the more recent fact. Original order is
+    restored at the end, because a teammate reading the journal and a model reading this
+    should see the same story in the same order.
 
-    This is a lexical score, not an understanding of relevance, and it will sometimes
-    drop the right fact. That is why the caller is told how many were withheld and the
-    prompt is told to say so out loud rather than presenting a trimmed list as
-    everything the group knows.
+    "Relevance" is cosine similarity between the fact's embedding and the goal's, when
+    both exist. It used to be content-word overlap, and `check_fact_budget_live.py`
+    caught that failing precisely where you would expect: a real discovery sharing no
+    vocabulary with the charter scored zero and lost its place to newer filler. "The
+    vendor never answers on Fridays" and "ship the app by the 30th" have no words in
+    common and everything else in common.
+
+    THE TWO SCALES ARE NEVER MIXED IN ONE SORT, and the first version of this got that
+    wrong in a way that made production measurably worse -- 3 of 4 real facts survived
+    under the pure lexical ranker, 2 of 4 under the mixed one.
+
+    The reason is that `gemini-embedding-001` does not put unrelated text near zero.
+    Measured against this product's own goal: total nonsense sits at **0.66** and a
+    genuinely relevant fact at 0.72-0.83. A 0.07 band above a 0.65 floor is plenty for
+    a relative ordering and useless as an absolute score -- so a fact with no vector,
+    scored 0.25 on a rescaled word-overlap, lost to filler sitting at 0.66.
+
+    So when there is a goal vector, unembedded facts are scored at the MEDIAN cosine of
+    the embedded ones: explicitly neither punished nor favoured, because "we did not
+    measure this" is not the same as "this is irrelevant". Word overlap then breaks
+    ties among them, which is the only place it can do no harm. Run
+    `scripts\\backfill_fact_vectors.py` and the mixed case stops existing.
     """
     if len(facts) <= GROUP_FACT_BUDGET:
         return list(facts), 0
 
     wanted = _content_words(about or "")
+    vectors = list(vectors or [])
     recent_from = len(facts) - GROUP_FACT_RECENT
-    scored = []
-    for i, fact in enumerate(facts):
-        if i >= recent_from:
-            continue
-        overlap = len(wanted & _content_words(fact)) if wanted else 0
-        scored.append((overlap, i))
-    scored.sort(key=lambda pair: (-pair[0], -pair[1]))
+    candidates = list(range(recent_from))
+
+    sims = {}
+    for i in candidates:
+        sim = embeddings.similarity(vectors[i] if i < len(vectors) else None, goal_vector)
+        if sim > -1.0:
+            sims[i] = sim
+
+    if sims:
+        ordered = sorted(sims.values())
+        neutral = ordered[len(ordered) // 2]
+    else:
+        neutral = 0.0
+
+    def lexical(fact: str) -> float:
+        # Only ever a TIE-BREAK when vectors are in play, so its absolute scale does
+        # not matter -- which is the whole point. It is the primary score only when
+        # nothing has a vector at all, and then everything is on this scale together.
+        if not wanted:
+            return 0.0
+        return min(1.0, len(wanted & _content_words(fact)) / 8.0)
+
+    def key(i: int) -> tuple[float, float, int]:
+        primary = sims.get(i, neutral if sims else lexical(facts[i]))
+        return (-primary, -lexical(facts[i]), -i)
 
     room = max(0, GROUP_FACT_BUDGET - GROUP_FACT_RECENT)
     keep = {i for i in range(recent_from, len(facts))}
-    keep |= {i for _, i in scored[:room]}
+    keep |= set(sorted(candidates, key=key)[:room])
     return [facts[i] for i in sorted(keep)], len(facts) - len(keep)
 
 

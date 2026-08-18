@@ -20,7 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from .authgate import current
-from .services import auth
+from .services import auth, embeddings
 from .services.store import store
 
 router = APIRouter(prefix="/api", tags=["challenge"])
@@ -171,6 +171,11 @@ def healthz() -> dict[str, Any]:
         # paths, which is the trap already documented above.
         "auth": auth.AUTH_MODE,
         "auth_configured": auth.browser_config()["enabled"],
+        # Whether group memory is ranked by meaning or by word overlap. It degrades
+        # silently by design -- a failed embedding must never take down an agent turn
+        # -- and something that degrades silently needs somewhere to say so, or the
+        # first anyone knows is a party quietly getting worse at remembering.
+        "fact_ranking": "embeddings" if embeddings.available() else "lexical",
         "models": {
             "reasoning": config.MODEL_REASONING,
             "cheap": config.MODEL_CHEAP,

@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from .. import config
+from . import embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -337,8 +338,66 @@ class Store:
                 return False
         facts.append(fact)
         existing["shared_facts"] = facts
+
+        # Embedded at WRITE time, once, rather than at read time on every tool call.
+        # A fact is written a handful of times in a challenge's life and read on every
+        # single agent turn, so this is the cheap end. It also means a failed embedding
+        # costs that one fact its vector rather than costing a whole turn its ranking.
+        #
+        # Stored as a list of maps rather than a list of lists: Firestore does not
+        # allow nested arrays, and finding that out at deploy time would be a bad
+        # afternoon. Index-aligned with `shared_facts`; a short or missing list just
+        # means those facts fall back to the lexical score.
+        vectors = list(existing.get("fact_vectors") or [])
+        while len(vectors) < len(facts) - 1:
+            vectors.append({})          # keep alignment for anything written earlier
+        vec = embeddings.embed_one(fact, task="RETRIEVAL_DOCUMENT")
+        vectors.append({"v": vec} if vec else {})
+        existing["fact_vectors"] = vectors
+
         self._put("groups", group_id, existing)
         return True
+
+    def fact_vectors(self, group_id: str) -> list[Optional[list[float]]]:
+        """Vectors index-aligned with `shared_facts`. `None` wherever there isn't one.
+
+        Truncated and padded to the fact count here rather than trusted, because the
+        alignment is an invariant held across two lists in one document and something
+        WILL break it. Something already did: `check_fact_budget_live.py` seeded 56
+        facts and then cleaned up by trimming `shared_facts` and not `fact_vectors`,
+        leaving 60 vectors against 4 facts. Benign that time, because the survivors
+        were the first four -- and silently catastrophic the day a delete happens in
+        the middle, when every fact after it would be ranked on its neighbour's vector.
+        A ranking on the wrong vector does not look like a bug. It looks like the model
+        being stupid.
+        """
+        doc = self.get("groups", group_id) or {}
+        facts = doc.get("shared_facts") or []
+        raw = doc.get("fact_vectors") or []
+        out = [(row or {}).get("v") for row in raw[:len(facts)]]
+        return out + [None] * (len(facts) - len(out))
+
+    def goal_vector(self, challenge_id: str, text: str) -> Optional[list[float]]:
+        """The embedding of what this challenge is FOR, cached until the goal changes.
+
+        Cached on the challenge document and keyed on the text it was made from, so a
+        redrawn graph or an edited charter invalidates it without anyone remembering to.
+        Without the cache this would be one embedding call per `read_challenge_state`,
+        which is one per tool call per turn per agent -- the exact shape of cost that
+        does not show up in testing and does show up on a bill.
+        """
+        text = (text or "").strip()
+        if not text:
+            return None
+        doc = self.get("challenges", challenge_id) or {}
+        cached = doc.get("goal_vector") or {}
+        if cached.get("text") == text and cached.get("v"):
+            return cached["v"]
+        vec = embeddings.embed_one(text, task="RETRIEVAL_QUERY")
+        if vec:
+            self._patch("challenges", challenge_id,
+                        {"goal_vector": {"text": text, "v": vec}})
+        return vec
 
     def supersede_nodes(self, challenge_id: str, keep_ids: list[str]) -> int:
         """Retire nodes that a redrawn graph no longer contains.
