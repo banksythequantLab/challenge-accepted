@@ -11,7 +11,14 @@ import pytest
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
+from challenge_accepted import config
 from challenge_accepted.sub_agents.forge import QUEUE_KEY, SLOT_PREFIX, Dispatcher
+
+#: These tests used to hardcode four slots, so lowering the concurrency floor to two
+#: failed three of them for a reason that had nothing to do with the Dispatcher. The
+#: batch size is a tuning knob measured against the live service (see
+#: `config.FORGE_WORKERS`); the fan-out rules it is asserting here hold at any width.
+W = config.FORGE_WORKERS
 
 
 def test_state_keys_are_template_safe():
@@ -58,12 +65,13 @@ async def _run_once(initial_state: dict) -> dict:
 
 @pytest.mark.asyncio
 async def test_fills_all_slots_and_leaves_remainder_queued():
-    specs = [_spec(f"n{i}") for i in range(6)]
+    total = W + 2  # every slot filled, with a remainder that must stay queued
+    specs = [_spec(f"n{i}") for i in range(total)]
     state = await _run_once({"tool_specs": {"specs": specs}})
 
-    assigned = [state.get(f"{SLOT_PREFIX}{i}") for i in range(4)]
-    assert [a["node_id"] for a in assigned] == ["n0", "n1", "n2", "n3"]
-    assert [s["node_id"] for s in state[QUEUE_KEY]] == ["n4", "n5"]
+    assigned = [state.get(f"{SLOT_PREFIX}{i}") for i in range(W)]
+    assert [a["node_id"] for a in assigned] == [f"n{i}" for i in range(W)]
+    assert [s["node_id"] for s in state[QUEUE_KEY]] == [f"n{i}" for i in range(W, total)]
 
 
 @pytest.mark.asyncio
@@ -72,7 +80,7 @@ async def test_skips_specs_that_need_no_tool():
     state = await _run_once({"tool_specs": {"specs": specs}})
 
     node_ids = [state[f"{SLOT_PREFIX}{i}"]["node_id"]
-                for i in range(4) if state.get(f"{SLOT_PREFIX}{i}")]
+                for i in range(W) if state.get(f"{SLOT_PREFIX}{i}")]
     assert node_ids == ["keep", "keep2"]
     assert state[QUEUE_KEY] == []
 
@@ -80,9 +88,10 @@ async def test_skips_specs_that_need_no_tool():
 @pytest.mark.asyncio
 async def test_idle_slots_are_cleared_not_stale():
     """A worker whose slot is None must see None, not the previous batch's spec."""
+    last = W - 1  # one spec fills slot 0, so the last slot is the idle one
     state = await _run_once({"tool_specs": {"specs": [_spec("only")]},
-                             f"{SLOT_PREFIX}3": _spec("stale")})
-    assert state[f"{SLOT_PREFIX}3"] is None
+                             f"{SLOT_PREFIX}{last}": _spec("stale")})
+    assert state[f"{SLOT_PREFIX}{last}"] is None
 
 
 @pytest.mark.asyncio

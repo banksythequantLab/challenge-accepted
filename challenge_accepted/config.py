@@ -51,7 +51,27 @@ MIN_NODES: int = int(os.getenv("CA_MIN_NODES", "8"))
 MAX_NODES: int = int(os.getenv("CA_MAX_NODES", "20"))
 
 #: How many Toolwright workers run concurrently in the FORGE phase.
-FORGE_WORKERS: int = int(os.getenv("CA_FORGE_WORKERS", "4"))
+#:
+#: Two, not four, and the number is measured rather than chosen. At four, the deployed
+#: service built 1, 3 and 1 tools out of 6, 7 and 6 specs across three runs: all four
+#: workers logged START with distinct specs, all four reached the model, exactly one
+#: made a second call, and `after_agent_callback` fired for NONE of them -- the
+#: signature of an exception inside the `asyncio.TaskGroup` that ParallelAgent runs the
+#: workers in, where one failure cancels its siblings mid-build. At two, the same
+#: scripted run built 7 of 7 twice in a row (revision 00050, 15:07 and 15:17), every
+#: worker reached END, the queue drained and the dispatcher escalated cleanly.
+#:
+#: Embeddings (`CA_EMBED=off`) and prompt size (4,548 chars vs 1,833) were each ruled
+#: out by experiment first; neither changed the outcome at four. The underlying
+#: exception is still unidentified -- no RESOURCE_EXHAUSTED, no 429, and the ERROR logs
+#: show only OpenTelemetry context-teardown noise, which is a symptom of the
+#: cancellation and not its cause. So this is a floor that works, not a diagnosis.
+#: Raising it again needs a run that proves the cause is gone, not a hunch.
+#:
+#: Cost of the floor: four batches instead of two for a seven-node graph, about 8.5
+#: minutes instead of ~5. The LoopAgent already reseeds until the queue drains, so
+#: coverage is unaffected -- only wall-clock.
+FORGE_WORKERS: int = int(os.getenv("CA_FORGE_WORKERS", "2"))
 
 
 def use_vertex_models() -> bool:

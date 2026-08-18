@@ -36,6 +36,7 @@ async def _set_specs(runner: InMemoryRunner, session_id: str, specs: list[dict])
               actions=EventActions(state_delta={"tool_specs": {"specs": specs}})),
     )
 
+from challenge_accepted import config
 from challenge_accepted.sub_agents.forge import QUEUE_KEY, SLOT_PREFIX, Dispatcher
 
 APP = "forge_reentry"
@@ -45,7 +46,9 @@ SEEN: list[list[str]] = []
 
 
 class RecordingWorkers(BaseAgent):
-    workers: int = 4
+    #: Mirror the real fan-out width rather than hardcoding it, or this stand-in reads
+    #: slots the Dispatcher was never asked to fill.
+    workers: int = config.FORGE_WORKERS
 
     async def _run_async_impl(
         self, ctx: InvocationContext
@@ -100,10 +103,14 @@ async def test_second_forge_entry_dispatches_the_new_specs():
     SEEN.clear()
     await _run(runner, session.id)
 
-    assert SEEN == [["b1", "b2", "b3"]], (
+    # Assert on the specs that reached workers, not on how they were batched: the
+    # batch width is a tuning knob (`config.FORGE_WORKERS`, lowered from 4 to 2 after
+    # measuring the live service) and this test is about reseeding, not concurrency.
+    assert [node for batch in SEEN for node in batch] == ["b1", "b2", "b3"], (
         f"second pass dispatched {SEEN} -- the new specs were dropped because the "
         f"drained queue from the first pass was treated as authoritative."
     )
+    assert all(len(batch) <= config.FORGE_WORKERS for batch in SEEN), SEEN
     final = await runner.session_service.get_session(
         app_name=APP, user_id=USER, session_id=session.id
     )
