@@ -30,11 +30,12 @@ service broke.
 |---|---|
 | Verified **locally** | 8-turn interview -> charter saved -> 12-node DAG -> 6 tools built, smoke-tested and persisted. This row said *Verified live* for weeks and was wrong: it was only ever true against a local server on a `GOOGLE_API_KEY`. On the deployed service every Toolwright was dying. See Known issues |
 | Verified live | Warden -> `forge` transfer via `transfer_to_agent`; Quartermaster `output_schema`; parallel Toolwrights executing real code |
-| Verified | **173** tests pass against a real ADK `Runner`, plus **30** checks in `scripts\check_*` that drive the actual controls; FastAPI boots, `/api/healthz` 200. All of them re-run against the current build after today's deploys -- not carried over from a green run last week. That count was stale at *137 tests, 18 live checks* for a while, which is a small lie of the same species as the auth row below |
+| Verified | **179** tests pass against a real ADK `Runner`, plus **32** checks in `scripts\check_*` that drive the actual controls; FastAPI boots, `/api/healthz` 200. All of them re-run against the current build after today's deploys -- not carried over from a green run last week. That count was stale at *137 tests, 18 live checks* for a while, which is a small lie of the same species as the auth row below |
 | Verified live | **The layout holds on seven viewports, on the deployed site.** `scripts\check_devices.py https://challengeaccepted.app`: Galaxy S9+ 320, iPhone 13 390, Pixel 7 412 (the first Android ever tested), iPad Mini 768, iPad landscape 1024, laptop 1280 and 1440 -- rendering a real challenge pulled from the live API. Three bugs found, the third by looking at the screenshots after every numeric assertion had passed. See Known issues |
 | Verified live | **Two people, one challenge, on the deployed service.** `scripts\check_party_live.py`: Dana joins with nothing but a challenge id and is told *"Cloud Run failed due to GCP admin and billing restrictions, so all hosting is strictly on Vercel"* -- Derek's discovery, which she had no other way to know -- then handed an open node by name. Her private group stays empty; the roster reads 2. This is the beat at 2:20 in the demo script, and until now it had only ever been proven against localhost |
 | Verified live | **FORGE drains the whole queue on the deployed service.** Two consecutive runs: **6 specs asked / 6 tools built**, then **7 / 7**. `scripts\check_forge_live.py` compares the Quartermaster's specs against what was persisted and fails on any gap. Three bugs deep: **0 tools** on every revision, then **1 of 7** with three workers silently cancelled, then **4 of 7** with the second batch idling. Then a fourth thing, which was not a bug in FORGE at all: **sign-in locked this check out of production**, and for several revisions the only measurement of the money shot was nothing. It signs in now, and the run that proves it is **6 asked / 6 built** in 170s with four Toolwrights working concurrently on the current revision. See Known issues |
 | Verified live | **7 of 7 tools open and work** -- and it was 2 of 6 the same day. `scripts\check_tool_render.py --browser` loads each one into a real sandboxed iframe with `app.html`'s own flags and its own storage shim, and reads back the worked example the Toolwright is required to render on load. Two of the seven were caught by that browser pass alone: a checklist the parser could not read, and a tracker that threw `Access is denied` on `localStorage` and was a **white rectangle** to anyone who opened it. Both passed every check that did not actually run them. See Known issues |
+| Verified live | **Tools remember.** A sandboxed page has no storage, so a tracker forgot everything the moment the modal closed. The dashboard now brokers it: state is fetched before the page runs and seeded in, the storage shim posts writes back over `postMessage`, and the parent saves them against your account — the tool never sees a token and does not know any of this exists. `scripts\check_tool_memory.py` drives the whole path on the deployed site: write from inside the frame, close the modal *inside* the debounce window, **reload the entire page**, reopen, and the value is still there. Checklist ticks moved to the same store, so a list you half-finished on a laptop is no longer blank on your phone |
 | Verified live | **You can leave a party, and leaving means something.** `scripts\check_party_exit_live.py`: a teammate joins on an invite link, leaves on her own request, and is then 403 on the dashboard, the tools and the journal, with the quest gone from her picker. A plain member cannot remove anyone else; the owner can; nobody can remove the owner. What she discovered stays -- her leaving does not make it untrue. Six unit tests pin the same rules |
 | Verified live | **A refused step gets written down.** The Referee held every tool it needed to say no and none to record having said it, so a step attempted twice and refused twice looked identical to one nobody had touched. On the deployed service, vague evidence now leaves a journal entry: *"Claimed the baseline fitness time trial was done without providing the baseline time trial distance, finish time, or average pace."* |
 | Verified live | **Shared memory is bounded, and says when it is.** `scripts\check_fact_budget_live.py` seeds a party past the budget on production and reads what the model was actually handed: **40 facts of 60, `group_facts_withheld: 20`**, plus a note telling it to say the team may know more rather than that something is unknown. Five unit tests pin the ranking. It also measured the honest limit -- an old fact sharing no words with the goal can lose to newer noise, and the check reports that rather than asserting a guarantee the design cannot make |
@@ -1068,7 +1069,7 @@ challenge_accepted/
     store.py          Firestore repository, in-memory fallback
     tools.py          ADK FunctionTools over the store
 main.py               Cloud Run entrypoint via get_fast_api_app
-tests/                173 tests, no API key required
+tests/                179 tests, no API key required
 scripts/              live walkthroughs and browser-driven end-to-end checks
 deploy/               deploy.ps1, check.ps1, smoke_live.ps1, SETUP.md
 docs/                 plan + architecture diagram
@@ -1077,12 +1078,17 @@ docs/                 plan + architecture diagram
 ## Next
 
 1. ~~**Make the tools usable, not just readable.**~~ **Done: 2 of 6 → 7 of 7 on the
-   deployed service.** See Known issues, including the white-rectangle tracker the
-   browser pass caught on its first run and the 170s → 361s cost of getting there.
-   What is still open is narrower: `script` and `research_brief` are prose by design,
-   and a `tracker` cannot persist anything between sessions, because a sandboxed page
-   has nowhere to put it. Saving a tracker's entries needs a server-side home and a
-   decision about who owns that data.
+   deployed service, and they remember now.** See Known issues, including the
+   white-rectangle tracker the browser pass caught on its first run and the 170s →
+   361s cost of getting there. Tool state has a server-side home scoped to the person,
+   brokered through the parent page so the sandbox stays shut.
+
+   What is left is narrower and worth naming. State is **per person**, so a party
+   cannot keep one shared log — deliberate, because the alternative is a teammate
+   silently unticking your boxes, but it does mean "we are tracking this together" is
+   not a thing you can do yet. Ticks saved in a browser before this landed do not
+   migrate; they were never anywhere the server could see. And 64KB per tool is a
+   guess, not a measurement.
 2. **Group-scoped memory.** Memory Bank is live and proven (see Known issues), but it
    scopes to `(app_name, user_id)` -- it is personal recall across challenges. A
    teammate joining a party does not inherit it. The party's shared memory is still
