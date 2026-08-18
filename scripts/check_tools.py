@@ -6,9 +6,21 @@ screenshot of a tool.
 
 Seeds the demo challenge, then for each tool asserts the right renderer fired:
 
-  mini_app       -> a sandboxed iframe whose script actually RUNS (not just loads)
+  mini_app, calculator, tracker, drill
+                 -> a sandboxed iframe whose script actually RUNS (not just loads)
   checklist      -> interactive checkboxes that persist when ticked
-  python/text    -> readable source
+  script, research_brief
+                 -> readable text, which is what those two ARE
+
+That third line used to read `python/text -> readable source`, and that sentence is
+worth remembering. It was written when a `calculator` was a Python file, and it
+quietly promoted the limitation to a specification: four dead tools passed this check
+for weeks because it had been told to expect them. `check_tool_render.py` measured 2
+of 6 usable on production while this file said every tool opened and worked -- both
+were correct about what they asked, and only one was asking the right thing.
+
+A check that encodes today's shortcoming as tomorrow's requirement is worse than no
+check. It is a shortcoming with a green tick next to it.
 
     python scripts\\check_tools.py
 """
@@ -33,6 +45,11 @@ from seed_demo import main as seed  # noqa: E402
 
 PORT = 8145
 STATIC = ROOT / "challenge_accepted" / "static" / "app.html"
+
+#: The types the user is meant to OPERATE rather than read. Kept in step with the
+#: same list in app.html and check_tool_render.py -- three copies is two too many, and
+#: the day they disagree is the day one of them starts passing for the wrong reason.
+RUNNABLE = ("mini_app", "calculator", "tracker", "drill")
 
 app = FastAPI()
 app.include_router(router)
@@ -96,9 +113,15 @@ def main() -> None:
                 "source": page.query_selector("#m-stage pre.src") is not None,
             }
 
+            if ttype in RUNNABLE and not shown["iframe"]:
+                failures.append(
+                    f"{name}: a {ttype} is something the user OPERATES and it did not "
+                    f"render a runnable page. This is the assertion that used to be "
+                    f"missing, and its absence certified four dead tools")
+
             if ttype == "mini_app":
                 if not shown["iframe"]:
-                    failures.append(f"{name}: mini_app did not render an iframe")
+                    pass          # already reported above, with the reason
                 else:
                     # Load is not proof. Click its button and require the DOM to change.
                     # The slowest simulated worker can take ~4s, so poll rather than
@@ -127,6 +150,12 @@ def main() -> None:
                         "#m-stage .check", "e => e.classList.contains('done')")
                     if not stuck:
                         failures.append(f"{name}: ticking an item did nothing")
+
+            elif ttype in ("script", "research_brief"):
+                # Prose. Rendering it as text is the design, not a gap -- but it still
+                # has to render SOMETHING.
+                if not shown["source"]:
+                    failures.append(f"{name}: {ttype} rendered nothing at all")
 
             elif not (shown["source"] or shown["iframe"] or shown["checks"]):
                 failures.append(f"{name}: nothing rendered")

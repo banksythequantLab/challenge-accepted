@@ -5,41 +5,90 @@ when nothing could open a tool. Now that the dashboard renders them, placeholder
 sources make the most important screen in the demo look broken.
 
 These are the shapes the Toolwright actually emits, per its prompt: a self-contained
-HTML document for `mini_app`, structured JSON for `checklist`, Python for
-`calculator`/`tracker`/`drill`, and plain text for `script`/`research_brief`.
+HTML document for `mini_app`, `calculator`, `tracker` and `drill`, structured JSON for
+`checklist`, and plain text for `script` / `research_brief`.
+
+**The calculator was Python here until the day the product stopped shipping Python.**
+Seed data is a claim about what the agents produce, and a demo seeded with the old
+shape shows a judge a `<pre>` full of source where the live product now shows a working
+form. It was also the thing on camera. If the Toolwright's output shape changes again,
+this file changes with it or the demo starts lying.
 """
 
 from __future__ import annotations
 
+#: Note what this does on load: it computes the smoke test's own example and writes it
+#: into `[data-smoke]`, exactly as the Toolwright is instructed to. It also persists
+#: through `localStorage`, which the dashboard backs with the user's account -- so the
+#: beats you type in the demo are still there after a reload.
 PACING_CALCULATOR = '''\
-"""Video Pacing Calculator - keeps a demo video under a hard time cap."""
-
-
-def pacing(beats, cap_seconds=240):
-    """beats: list of (name, seconds). Returns per-beat share and headroom."""
-    total = sum(seconds for _, seconds in beats)
-    return {
-        "total_seconds": total,
-        "cap_seconds": cap_seconds,
-        "headroom_seconds": cap_seconds - total,
-        "over_cap": total > cap_seconds,
-        "breakdown": [
-            {"beat": name, "seconds": s, "percent": round(100 * s / total, 1)}
-            for name, s in beats
-        ],
-    }
-
-
-if __name__ == "__main__":
-    result = pacing([
-        ("hook", 20), ("interview", 30), ("graph", 30),
-        ("forge", 60), ("teammate", 30), ("feedback", 15),
-        ("copy-out", 15), ("architecture", 15), ("close", 10),
-    ])
-    print(f"total {result['total_seconds']}s of {result['cap_seconds']}s "
-          f"({result['headroom_seconds']}s spare)")
-    for row in result["breakdown"]:
-        print(f"  {row['beat']:<14} {row['seconds']:>3}s  {row['percent']:>5}%")
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<style>
+  body{font:14px/1.5 system-ui,sans-serif;margin:0;padding:18px;color:#15202b;background:#fff}
+  h1{font-size:15px;margin:0 0 4px} p.sub{margin:0 0 14px;color:#5f6d7e;font-size:12.5px}
+  table{border-collapse:collapse;width:100%;margin-bottom:12px}
+  th,td{text-align:left;padding:5px 6px;border-bottom:1px solid #e4e9f0;font-size:13px}
+  th{font-size:11px;text-transform:uppercase;letter-spacing:.7px;color:#5f6d7e}
+  td.n{text-align:right;font-variant-numeric:tabular-nums}
+  input{width:64px;padding:4px 6px;border:1px solid #cdd6e0;border-radius:6px;font:inherit;
+        text-align:right}
+  .bar{height:6px;border-radius:3px;background:#4285f4;min-width:2px}
+  .tot{font-weight:600}
+  #verdict{padding:10px 12px;border-radius:8px;font-size:13px;margin-top:4px}
+  .ok{background:#e6f4ea;color:#137333} .over{background:#fce8e6;color:#c5221f}
+  button{margin-top:10px;padding:7px 12px;border:1px solid #cdd6e0;border-radius:7px;
+         background:#f6f8fb;font:inherit;cursor:pointer}
+</style></head>
+<body>
+<h1>Video Pacing Calculator</h1>
+<p class="sub">Type seconds per beat. The cap is 240s &mdash; the submission limit.</p>
+<table><thead><tr><th>Beat</th><th>Seconds</th><th>Share</th><th></th></tr></thead>
+<tbody id="rows"></tbody>
+<tfoot><tr class="tot"><td>Total</td><td class="n" id="total">-</td>
+<td class="n" id="pct">-</td><td></td></tr></tfoot></table>
+<div id="verdict" data-smoke></div>
+<button id="reset">Reset to the default cut</button>
+<script>
+  var DEFAULT = [["hook",20],["interview",30],["graph",30],["forge",60],
+                 ["teammate",30],["feedback",15],["copy-out",15],
+                 ["architecture",15],["close",10]];
+  var CAP = 240;
+  function load(){
+    try { var s = localStorage.getItem("beats"); if (s) return JSON.parse(s); } catch (e) {}
+    return DEFAULT.map(function(b){ return b.slice(); });
+  }
+  var beats = load();
+  function save(){ try { localStorage.setItem("beats", JSON.stringify(beats)); } catch (e) {} }
+  function draw(){
+    var total = beats.reduce(function(a,b){ return a + b[1]; }, 0);
+    document.getElementById("rows").innerHTML = beats.map(function(b,i){
+      var pct = total ? Math.round(1000 * b[1] / total) / 10 : 0;
+      return '<tr><td>' + b[0] + '</td>'
+           + '<td class="n"><input data-i="' + i + '" type="number" min="0" value="' + b[1] + '"></td>'
+           + '<td class="n">' + pct + '%</td>'
+           + '<td><div class="bar" style="width:' + Math.max(2, pct * 2) + 'px"></div></td></tr>';
+    }).join("");
+    document.getElementById("total").textContent = total + "s";
+    document.getElementById("pct").textContent = (total - CAP) + "s vs cap";
+    var v = document.getElementById("verdict");
+    v.className = total > CAP ? "over" : "ok";
+    v.textContent = total > CAP
+      ? "Over by " + (total - CAP) + "s. Cut something."
+      : "Total " + total + "s of " + CAP + "s - " + (CAP - total) + "s spare.";
+    Array.prototype.forEach.call(document.querySelectorAll("input"), function(el){
+      el.onchange = function(){
+        beats[+el.dataset.i][1] = Math.max(0, parseInt(el.value, 10) || 0);
+        save(); draw();
+      };
+    });
+  }
+  document.getElementById("reset").onclick = function(){
+    beats = DEFAULT.map(function(b){ return b.slice(); }); save(); draw();
+  };
+  draw();
+</script>
+</body></html>
 '''
 
 BACKEND_CHECKLIST = '''\
