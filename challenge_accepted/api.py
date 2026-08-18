@@ -12,6 +12,7 @@ you are recording a video at 2am.
 
 from __future__ import annotations
 
+import json
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -39,6 +40,19 @@ class JoinIn(BaseModel):
                     "roster is built from the verified token, because honouring a "
                     "client's claim here would let anyone add anyone to any party. "
                     "Still load-bearing with auth off, e.g. a local dev server.")
+
+
+#: Bytes of JSON a single tool may save per person. Generous for a season of training
+#: logs, small enough that a runaway loop in model-written JavaScript cannot turn this
+#: into a storage bill.
+TOOL_STATE_LIMIT = 64 * 1024
+
+
+class ToolStateIn(BaseModel):
+    state: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Whatever the tool wants to remember for this person. Opaque to "
+                    "the server -- it is the tool's own shape, not ours.")
 
 
 class FeedbackIn(BaseModel):
@@ -341,6 +355,44 @@ def remove_from_party(challenge_id: str, user_id: str,
         "left": user_id == (caller.uid if auth.required() else user_id),
         "party": _party(challenge),
     }
+
+
+@router.get("/challenges/{challenge_id}/tools/{tool_id}/state")
+def get_tool_state(challenge_id: str, tool_id: str,
+                   caller: auth.Caller = Depends(current)) -> dict[str, Any]:
+    """What this tool has saved for you.
+
+    The page that needs this cannot ask for it. Tools run in a sandboxed iframe with
+    no same-origin privilege -- no storage, no cookies, no way to attach a token -- so
+    the dashboard fetches on the tool's behalf and hands the state in. The tool never
+    sees a credential, which is the entire reason the sandbox is that tight: the
+    source running in there was written by a model.
+    """
+    _mine(challenge_id, caller)
+    return {"tool_id": tool_id, "state": store.get_tool_state(tool_id, caller.uid)}
+
+
+@router.put("/challenges/{challenge_id}/tools/{tool_id}/state")
+def put_tool_state(challenge_id: str, tool_id: str, body: ToolStateIn,
+                   caller: auth.Caller = Depends(current)) -> dict[str, Any]:
+    """Save what this tool has recorded for you.
+
+    Bounded on purpose. This is a key-value bag written by model-generated JavaScript
+    running in a loop nobody reviewed, and an unbounded one is a free write endpoint
+    on somebody else's Firestore bill. A tracker logging a season of runs is a few
+    kilobytes; anything past the cap is a bug in the tool, and it is told so rather
+    than silently truncated.
+    """
+    _mine(challenge_id, caller)
+    if not any(t.get("id") == tool_id for t in store.list_tools(challenge_id)):
+        raise HTTPException(status_code=404, detail="No such tool on this challenge")
+    size = len(json.dumps(body.state))
+    if size > TOOL_STATE_LIMIT:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Tool state is {size} bytes; the limit is {TOOL_STATE_LIMIT}.")
+    store.put_tool_state(challenge_id, tool_id, caller.uid, body.state)
+    return {"status": "ok", "bytes": size}
 
 
 @router.get("/challenges/{challenge_id}/graph")

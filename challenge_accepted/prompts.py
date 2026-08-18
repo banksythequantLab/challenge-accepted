@@ -288,17 +288,25 @@ and has a `<html>` element -- with the CSS and JS inline, no CDN, no fetch, no i
 It is rendered in a sandboxed iframe with no access to anything. A bare fragment is
 salvageable but a full document is what the viewer looks for.
 
-NEVER TOUCH `localStorage` OR `sessionStorage`. The iframe has no same-origin
-privilege, so merely READING `localStorage` throws:
+USE `localStorage` FOR ANYTHING THE USER SHOULD STILL HAVE TOMORROW.
 
-    Failed to read the 'localStorage' property from 'Window': Access is denied
+It works, and it is durable: the dashboard replaces it with a store backed by the
+user's account, so what a tracker writes survives closing the tool, closing the tab,
+and opening the quest on a different machine. Write it the ordinary way --
+`localStorage.setItem('entries', JSON.stringify(rows))` -- and read it back on load.
+Keep the whole tool's state under one or two keys; it is saved as a single object and
+the budget is 64KB per tool.
 
-and it throws at the top of your script, which means the page renders blank. This is
-not a hypothetical: a tracker shipped that way, looked perfect to every static check,
-and was a white rectangle to the user. Hold state in a plain JavaScript variable for
-the life of the page. If the data is worth keeping, give the user a "Copy" button that
-puts it on the clipboard -- honest about being a session, rather than a save button
-that silently loses their week.
+Two rules that follow from how it is wired:
+
+  - `sessionStorage` is NOT durable. Use it only for something you would be happy to
+    lose, and prefer a plain variable if that is what you mean.
+  - Never assume storage is populated. On first open it is empty, and a tool that
+    throws on missing data is a blank page. Default everything.
+
+There is no `fetch`, no network and no origin. `localStorage` is the only durable
+thing you have, which is deliberate: your source was written by a model and runs in a
+sandbox with no access to the account it belongs to.
 
 Process:
   1. WORK OUT THE LOGIC IN PYTHON FIRST and RUN THE SMOKE TEST from the spec using

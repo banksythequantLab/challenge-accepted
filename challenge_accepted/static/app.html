@@ -264,6 +264,11 @@
   .exits:empty{display:none}
   .exits .rm{font-size:11px;color:var(--dim)}
   .exits .rm[data-armed="1"]{color:var(--blocked);border-color:var(--blocked)}
+  /* A save that fails silently feels identical to a tool that never persisted --
+     you find out days later that the log is empty. */
+  .savewarn{background:rgba(234,67,53,.12);border:1px solid var(--blocked);
+    border-radius:8px;padding:8px 11px;margin-bottom:10px;font-size:12.5px;
+    color:var(--ink)}
   .facts{margin:0;padding:12px 16px 12px 30px}
   .facts li{margin:6px 0;font-size:12.5px;color:var(--prose)}
 
@@ -1346,35 +1351,116 @@ function toolAsText(t) {
 //:
 //: Loosening the sandbox instead was never an option -- `allow-same-origin` would hand
 //: model-written JavaScript the dashboard's own origin, its session and its token.
+//: The stub is now BACKED. It hydrates from `window.__CA_STATE`, which the parent
+//: fetched from the server before the page ran, and every write posts the whole bag
+//: back to the parent, which saves it. So a tool that reaches for localStorage -- the
+//: obvious thing to reach for -- gets real persistence without knowing anything about
+//: this app, and without ever touching a credential. The page cannot call our API
+//: itself: it has an opaque origin and no token, which is exactly the point.
+//:
+//: `sessionStorage` is deliberately NOT backed. A tool that chooses it is saying it
+//: wants a scratchpad, and quietly making that durable would be us overruling it.
 const STORAGE_SHIM = `<script>(function(){
-  try { window.localStorage.getItem('x'); return; } catch (e) {}
-  var mk = function(){ var m = {};
+  var seed = window.__CA_STATE || {};
+  var save = function(m){
+    try { parent.postMessage({ __ca: 'state', state: m }, '*'); } catch (e) {}
+  };
+  var mk = function(initial, persist){ var m = Object.assign({}, initial || {});
     return { getItem: function(k){ return k in m ? m[k] : null; },
-             setItem: function(k, v){ m[k] = String(v); },
-             removeItem: function(k){ delete m[k]; },
-             clear: function(){ m = {}; },
+             setItem: function(k, v){ m[k] = String(v); if (persist) save(m); },
+             removeItem: function(k){ delete m[k]; if (persist) save(m); },
+             clear: function(){ m = {}; if (persist) save(m); },
              key: function(i){ return Object.keys(m)[i] || null; },
              get length(){ return Object.keys(m).length; } }; };
-  try { Object.defineProperty(window, 'localStorage', { value: mk(), configurable: true }); } catch (e) {}
-  try { Object.defineProperty(window, 'sessionStorage', { value: mk(), configurable: true }); } catch (e) {}
+  // Replace it even where storage WOULD work, so behaviour does not depend on where
+  // the page happens to be opened. The alternative is a tool that persists in one
+  // context and not another, which is the worst of both.
+  try { Object.defineProperty(window, 'localStorage', { value: mk(seed, true), configurable: true }); } catch (e) {}
+  try { Object.defineProperty(window, 'sessionStorage', { value: mk({}, false), configurable: true }); } catch (e) {}
 })();<\/script>`;
 
-function withStorageShim(doc) {
+function withStorageShim(doc, state) {
+  //: A closing script tag inside a string literal still ends the enclosing block as
+  //: far as the HTML parser is concerned, so a saved value containing one would break
+  //: out of the seed and into the document. That is model-written data going into a
+  //: page, which is exactly where this bites -- hence escaping every `<`.
+  //:
+  //: Writing that sequence out longhand in THIS comment broke the dashboard, and
+  //: check_render.mjs caught it on the next run: two script blocks that no longer
+  //: parsed. The rule applies to prose about the rule.
+  const seed = '<script>window.__CA_STATE = '
+    + JSON.stringify(state || {}).replace(/</g, '\\u003c')
+    + ';<\/script>';
+  const inject = seed + STORAGE_SHIM;
   // Ahead of anything the page runs, and still inside <head> so it does not land
   // before the doctype and drop the document into quirks mode.
   const head = doc.match(/<head[^>]*>/i);
-  if (head) return doc.replace(head[0], head[0] + STORAGE_SHIM);
+  if (head) return doc.replace(head[0], head[0] + inject);
   const html = doc.match(/<html[^>]*>/i);
-  if (html) return doc.replace(html[0], html[0] + '<head>' + STORAGE_SHIM + '</head>');
+  if (html) return doc.replace(html[0], html[0] + '<head>' + inject + '</head>');
   const dt = doc.match(/<!doctype html>/i);
-  if (dt) return doc.replace(dt[0], dt[0] + STORAGE_SHIM);
-  return STORAGE_SHIM + doc;
+  if (dt) return doc.replace(dt[0], dt[0] + inject);
+  return inject + doc;
 }
 
-function renderTool(t) {
+//: The tool whose state we are currently brokering, and the pending save.
+//:
+//: Saves are debounced because a tracker that calls setItem on every keystroke would
+//: otherwise be a PUT per keystroke. 800ms is long enough to collapse typing and short
+//: enough that closing the modal deliberately (which flushes) is not the only way
+//: anything reaches the server.
+let statefulTool = null, saveTimer = null, pendingState = null;
+
+async function flushToolState() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  if (!statefulTool || pendingState === null || !challengeId) return;
+  const body = pendingState;
+  pendingState = null;
+  try {
+    await api(`/challenges/${challengeId}/tools/${statefulTool}/state`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ state: body }),
+    });
+  } catch (e) {
+    // Loud, because a save that silently fails is the same experience as a tool that
+    // never persisted: the user finds out days later that their log is empty.
+    console.error('could not save tool state', e);
+    toolStateWarning(e.status === 413
+      ? 'This tool tried to save more than 64KB. Its entries are not being kept.'
+      : 'Could not save this tool’s entries. They will be lost when you close it.');
+  }
+}
+
+function toolStateWarning(text) {
+  const stage = $('m-stage');
+  if (!stage || stage.querySelector('.savewarn')) return;
+  const warn = document.createElement('div');
+  warn.className = 'savewarn';
+  warn.textContent = text;
+  stage.prepend(warn);
+}
+
+//: One listener for the life of the page. A tool page can only reach us through
+//: postMessage -- it has an opaque origin and no token -- and we only listen to the
+//: frame we are currently showing, so a stale frame mid-teardown cannot write over
+//: the tool you just opened.
+window.addEventListener('message', e => {
+  const frame = document.getElementById('frame');
+  if (!frame || e.source !== frame.contentWindow) return;
+  if (!e.data || e.data.__ca !== 'state' || typeof e.data.state !== 'object') return;
+  pendingState = e.data.state;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flushToolState, 800);
+});
+
+async function renderTool(t) {
   const stage = $('m-stage');
   const src = t.source || '';
   stage.innerHTML = '';
+  statefulTool = null;
+  pendingState = null;
+  clearTimeout(saveTimer);
 
   if (!src) {
     stage.innerHTML = '<div class="empty">This tool has no saved content.</div>';
@@ -1394,13 +1480,25 @@ function renderTool(t) {
   const RUNNABLE = ['mini_app', 'calculator', 'tracker', 'drill'];
   const hasMarkup = /<[a-z][\s\S]*>/i.test(src);
   if (looksHTML(src) || (RUNNABLE.includes(t.type) && hasMarkup && !looksPython(src))) {
+    // Load before render, not after. Handing the page its state a moment late means
+    // it draws an empty tracker and then repopulates, and the user has already read
+    // "no entries yet" and believed it.
+    let saved = {};
+    try {
+      const r = await api(`/challenges/${challengeId}/tools/${t.id}/state`);
+      saved = r.state || {};
+    } catch (e) { console.error('could not load tool state', e); }
+    if (stage.dataset.tool !== t.id) return;   // they closed it, or opened another
+
+    statefulTool = t.id;
     const f = document.createElement('iframe');
     f.id = 'frame';
     f.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
     f.srcdoc = withStorageShim(looksHTML(src)
       ? src
       : '<!doctype html><meta charset="utf-8">' +
-        '<style>body{font:14px system-ui,sans-serif;margin:16px;color:#111}</style>' + src);
+        '<style>body{font:14px system-ui,sans-serif;margin:16px;color:#111}</style>' + src,
+      saved);
     stage.appendChild(f);
     return;
   }
@@ -1408,9 +1506,17 @@ function renderTool(t) {
   if (t.type === 'checklist') {
     const items = checklistItems(src);
     if (items) {
-      const key = 'ca_check_' + t.id;
+      //: Ticks used to live in this browser's localStorage, which meant a checklist
+      //: you half-finished on your laptop was blank on your phone -- and the app was
+      //: telling you nothing had been done. They go through the same per-user store
+      //: the sandboxed tools use, so what you ticked follows YOU.
       let done = [];
-      try { done = JSON.parse(localStorage.getItem(key)) || []; } catch {}
+      try {
+        const r = await api(`/challenges/${challengeId}/tools/${t.id}/state`);
+        done = Array.isArray(r.state && r.state.done) ? r.state.done : [];
+      } catch (e) { console.error('could not load checklist ticks', e); }
+      if (stage.dataset.tool !== t.id) return;
+      statefulTool = t.id;
       items.forEach((item, i) => {
         const row = document.createElement('label');
         row.className = 'check' + (done.includes(i) ? ' done' : '');
@@ -1420,7 +1526,11 @@ function renderTool(t) {
         row.querySelector('input').onchange = e => {
           row.classList.toggle('done', e.target.checked);
           done = e.target.checked ? [...done, i] : done.filter(x => x !== i);
-          localStorage.setItem(key, JSON.stringify(done));
+          // Same debounce as the iframe path: tick five boxes quickly and that is one
+          // request, not five.
+          pendingState = { done };
+          clearTimeout(saveTimer);
+          saveTimer = setTimeout(flushToolState, 800);
         };
         stage.appendChild(row);
       });
@@ -1457,6 +1567,11 @@ function openTool(id) {
   usage.innerHTML = md(t.usage || '');
   usage.style.display = t.usage ? '' : 'none';
 
+  //: Stamped BEFORE the await inside renderTool. Loading state is a network round
+  //: trip, and opening two tools quickly would otherwise let the slower response
+  //: paint into a modal that has moved on -- and, worse, leave `statefulTool`
+  //: pointing at the first tool while the second one's writes arrive.
+  $('m-stage').dataset.tool = id;
   renderTool(t);
 
   $('m-copy').onclick = e => copyText(toolAsText(t), e.target);
@@ -1489,7 +1604,16 @@ let toolOpener = null;
 
 function closeTool() {
   $('modal').classList.remove('on');
-  $('m-stage').innerHTML = '';   // stop any running mini-app
+  //: Flush BEFORE tearing the frame down. The save is debounced by 800ms, and a user
+  //: who types their last entry and immediately closes the modal is well inside that
+  //: window -- so without this, the most recent thing they did is the one thing that
+  //: never reaches the server. `flushToolState` reads `pendingState`, which survives
+  //: the teardown below, so this does not need awaiting.
+  flushToolState();
+  const stage = $('m-stage');
+  stage.innerHTML = '';   // stop any running mini-app
+  delete stage.dataset.tool;
+  statefulTool = null;
   if (toolOpener && document.contains(toolOpener)) toolOpener.focus();
   toolOpener = null;
 }

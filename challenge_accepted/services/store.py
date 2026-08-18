@@ -104,6 +104,9 @@ class Store:
             "groups": {},
             #: uid -> {name, email, picture}, written from a verified Google token.
             "users": {},
+            #: "<tool_id>:<uid>" -> what a tool has saved for that person. A sandboxed
+            #: iframe has no storage of its own; this is where its state actually goes.
+            "tool_state": {},
             # ADK conversations. See services/session_store.py for why these live here
             # rather than in the per-instance SQLite file ADK defaults to.
             "sessions": {},
@@ -190,6 +193,29 @@ class Store:
         }
         self._put("tools", tid, doc)
         return tid
+
+    def get_tool_state(self, tool_id: str, user_id: str) -> dict[str, Any]:
+        """Whatever a tool has saved for this person. Empty dict when it has saved none.
+
+        Tools run in a sandboxed iframe with no same-origin privilege, which means no
+        storage of their own -- so a tracker built to log a training week forgot it the
+        moment the modal closed. "Log your runs here" that forgets is not a tool, it is
+        a form.
+
+        Scoped to (tool, user) rather than to the party. A tracker holds YOUR mileage
+        and a checklist holds what YOU have ticked; merging those across a party would
+        be a shared editing model nobody asked for, and the first surprise would be a
+        teammate silently unticking your boxes. Party-wide state is what `group_facts`
+        and the graph already are.
+        """
+        return (self.get("tool_state", f"{tool_id}:{user_id}") or {}).get("data") or {}
+
+    def put_tool_state(self, challenge_id: str, tool_id: str, user_id: str,
+                       data: dict[str, Any]) -> None:
+        self._put("tool_state", f"{tool_id}:{user_id}", {
+            "challenge_id": challenge_id, "tool_id": tool_id, "user_id": user_id,
+            "data": data, "updated_at": _now(),
+        })
 
     def put_user(self, uid: str, profile: dict[str, Any]) -> None:
         """The name and avatar behind a uid, as Google stated them.
