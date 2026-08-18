@@ -109,13 +109,20 @@ def _entered(callback_context: Any):
     """
     _evict()
     turn = _TURNS.setdefault(_iid(callback_context),
-                             {"agents": [], "tools": [], "transfers": [], "deep": []})
+                             {"agents": [], "tools": [], "transfers": [], "deep": [], "flat": []})
     name = _name(callback_context)
     turn["agents"].append(name)
     branch = str(getattr(callback_context, "branch", "") or "")
     if not name.startswith(_QUIET_PREFIXES):
         _trace(f"enter {name}  branch={branch or '-'}  turn={_iid(callback_context)}")
-    if _NESTED in branch and name not in turn["deep"]:
+    if _NESTED not in branch:
+        # Where this agent runs when nothing has gone wrong. Recorded rather than
+        # assumed, because "runs in a sub-branch" is normal -- every single-turn and
+        # task agent does -- and warning on that made ten lines a turn out of a
+        # signal that is one.
+        if name not in turn["flat"]:
+            turn["flat"].append(name)
+    elif name in turn["flat"] and name not in turn["deep"]:
         turn["deep"].append(name)
         # See the module docstring: this is the shape the open bug takes. A single-turn
         # sub-agent is exposed to its parent as a TOOL and runs in an isolated
@@ -126,8 +133,9 @@ def _entered(callback_context: Any):
         # dies without an error. Observed: FORGE's workers made their second model
         # call, never reached `after_agent_callback`, and the loop never dispatched
         # again -- 5 specs, 2 tools, no traceback anywhere.
-        _trace(f"DEEP: {name} is running inside a single-turn sub-branch "
-               f"({branch}). Whatever it starts dies when that frame closes.")
+        _trace(f"DEEP: {name} ran at the top of this turn and is now running INSIDE "
+               f"{branch} -- it resumed in a child's frame instead of after it. "
+               f"Whatever it starts from here dies when that frame closes.")
     return None
 
 
@@ -170,7 +178,7 @@ def _left(callback_context: Any):
 def _tool_called(tool: Any, args: dict, tool_context: Any):
     """A tool call. MUST return None -- a dict here REPLACES the tool's result."""
     turn = _TURNS.setdefault(_iid(tool_context),
-                             {"agents": [], "tools": [], "transfers": [], "deep": []})
+                             {"agents": [], "tools": [], "transfers": [], "deep": [], "flat": []})
     name = str(getattr(tool, "name", tool))
     if name == TRANSFER:
         target = str((args or {}).get("agent_name") or "?")

@@ -23,5 +23,13 @@ archivist = LlmAgent(
     ),
     instruction=prompts.ARCHIVIST,
     mode="single_turn",
+    # Same trap as the Cartographer, and the comment there has the measurements. A
+    # single_turn agent runs as a TOOL in its own sub-branch; if it transfers back to
+    # the Warden instead of returning, the Warden resumes inside that sub-branch and
+    # everything it starts next dies when the tool call closes. This one has not been
+    # caught doing it -- it is closed off because the shape is identical and the
+    # failure is silent, not because there is a second traceback.
+    disallow_transfer_to_parent=True,
+    disallow_transfer_to_peers=True,
     tools=[read_challenge_state, write_journal, remember_group_fact],
 )

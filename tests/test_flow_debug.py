@@ -146,33 +146,35 @@ def test_running_inside_a_single_turn_sub_branch_is_called_out(caplog):
     `<name>@call_<n>`. Anything still carrying that in its branch is a frame deeper
     than it should be, and dies when the tool call closes.
     """
-    root = _Ctx("warden", "inv_deep")
-    deep = _Ctx("forge", "inv_deep", branch="cartographer@call_636196")
     with caplog.at_level(logging.WARNING):
-        flow_debug._entered(root)
-        flow_debug._entered(deep)
+        flow_debug._entered(_Ctx("warden", "inv_deep"))                       # flat
+        flow_debug._entered(_Ctx("cartographer", "inv_deep",
+                                 branch="cartographer@call_636196"))          # normal
+        flow_debug._entered(_Ctx("warden", "inv_deep",
+                                 branch="cartographer@call_636196"))          # the bug
 
-    assert "DEEP: forge" in caplog.text
+    assert "DEEP: warden" in caplog.text
     assert "cartographer@call_636196" in caplog.text
-    assert flow_debug._TURNS["inv_deep"]["deep"] == ["forge"]
+    assert flow_debug._TURNS["inv_deep"]["deep"] == ["warden"]
 
 
-def test_a_normal_branch_is_not_called_out(caplog):
-    """Sub-branches are normal; `@call_` ones on a resumed parent are not. Warning on
-    every branch would make the signal worthless within one run."""
+def test_an_agent_in_its_own_sub_branch_is_not_called_out(caplog):
+    """Running in a sub-branch is NORMAL -- every single-turn and task agent does it.
+    The first version warned on all of them and turned a one-line signal into ten."""
     with caplog.at_level(logging.WARNING):
         flow_debug._entered(_Ctx("warden", "inv_flat"))
+        flow_debug._entered(_Ctx("interviewer", "inv_flat",
+                                 branch="interviewer@call_470764"))
         flow_debug._entered(_Ctx("forge", "inv_flat", branch="forge_workers"))
     assert "DEEP" not in caplog.text
 
 
 def test_the_summary_reports_depth(caplog):
-    root = _Ctx("warden", "inv_sum")
-    flow_debug._entered(root)
-    flow_debug._entered(_Ctx("forge", "inv_sum", branch="cartographer@call_1"))
+    flow_debug._entered(_Ctx("warden", "inv_sum"))
+    flow_debug._entered(_Ctx("warden", "inv_sum", branch="cartographer@call_1"))
     with caplog.at_level(logging.WARNING):
-        flow_debug._left(root)
-    assert "deep=['forge']" in caplog.text
+        flow_debug._left(_Ctx("warden", "inv_sum"))
+    assert "deep=['warden']" in caplog.text
 
 
 def test_chaining_keeps_the_callback_that_was_already_there():
