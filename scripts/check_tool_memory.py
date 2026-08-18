@@ -125,6 +125,34 @@ def main() -> int:
             errors = in_frame(page, "() => (window.__CA_STATE && 'ok') || 'missing'")
             _p(f"5. seed on the second open : {errors}")
 
+            # --- every runnable tool, through the REAL dashboard ---------------
+            #
+            # check_tool_render.py --browser builds its own iframe. It sets srcdoc from
+            # JavaScript on an already-inserted element; app.html assigns srcdoc and
+            # THEN appends. Close enough to look identical and not close enough to be
+            # the same test -- which is how a check ends up measuring its own
+            # simulation. This opens each tool the way a person does: the product's own
+            # modal, the product's own shim, the product's own state fetch.
+            _p("\n--- opening every runnable tool through the dashboard ---")
+            page.evaluate("() => closeTool()")
+            page.wait_for_timeout(800)
+            errs: list[str] = []
+            page.on("pageerror", lambda e: errs.append(str(e)))
+            for t in [x for x in tools if (x.get("type") or "") in RUNNABLE]:
+                before = len(errs)
+                open_tool(page, t["id"])
+                body = (page.frame_locator("#frame").locator("body").inner_text()
+                        or "").strip()
+                new = errs[before:]
+                _p(f"  {(t.get('name') or '')[:44]:<46} body={len(body):>5}ch "
+                   f"errors={len(new)}")
+                if new:
+                    bad.append(f"{t.get('name')}: threw in the real dashboard -- {new[0][:110]}")
+                if not body:
+                    bad.append(f"{t.get('name')}: blank in the real dashboard")
+                page.evaluate("() => closeTool()")
+                page.wait_for_timeout(500)
+
             # --- the other half: checklist ticks -------------------------------
             # A different code path entirely. Ticks are rendered by the parent page,
             # not by a sandboxed frame, and they used to live in this browser's

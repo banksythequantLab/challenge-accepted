@@ -81,17 +81,31 @@ def main() -> int:
 
     _p(f"target   : {base}\nchallenge: {cid}\nowner    : {owner}\ndana     : {dana}\n")
 
-    _p("1. dana joins with nothing but the id:")
+    # The link's secret half comes from somebody already on the party -- Dana cannot
+    # read it herself, which is the whole point of it being a secret.
+    key = requests.get(f"{base}/api/challenges/{cid}/invite",
+                       headers=O, timeout=60).json().get("token")
+
+    _p("0. the invite key is not optional:")
+    show("POST .../join   with no key at all",
+         requests.post(f"{base}/api/challenges/{cid}/join", headers=D,
+                       json={"user_id": dana}, timeout=60).status_code, 403)
+    show("POST .../join   with a wrong key",
+         requests.post(f"{base}/api/challenges/{cid}/join", headers=D,
+                       json={"user_id": dana, "token": "not-the-key"},
+                       timeout=60).status_code, 403)
+
+    _p("\n1. dana joins with the link she was sent:")
     show("POST .../join",
          requests.post(f"{base}/api/challenges/{cid}/join", headers=D,
-                       json={"user_id": dana}, timeout=60).status_code, 200)
+                       json={"user_id": dana, "token": key}, timeout=60).status_code, 200)
     show("GET  .../dashboard  (she can read it now)",
          requests.get(f"{base}/api/challenges/{cid}/dashboard",
                       headers=D, timeout=60).status_code, 200)
 
     _p("\n2. a member cannot remove another member:")
     requests.post(f"{base}/api/challenges/{cid}/join", headers=T,
-                  json={"user_id": third}, timeout=60)
+                  json={"user_id": third, "token": key}, timeout=60)
     show("DELETE .../party/<someone else>  by a plain member",
          requests.delete(f"{base}/api/challenges/{cid}/party/{third}",
                          headers=D, timeout=60).status_code, 403)
@@ -135,6 +149,26 @@ def main() -> int:
         if not facts:
             bad.append("the party's shared memory is empty -- if it had facts before "
                        "this run, leaving destroyed them")
+
+    _p("\n6. resetting the link kills it, and leaves the roster alone:")
+    show("POST .../invite/rotate  by a plain member",
+         requests.post(f"{base}/api/challenges/{cid}/invite/rotate",
+                       headers=T, timeout=60).status_code, 403)
+    fresh = requests.post(f"{base}/api/challenges/{cid}/invite/rotate",
+                          headers=O, timeout=60)
+    show("POST .../invite/rotate  by the owner", fresh.status_code, 200)
+    if fresh.ok and fresh.json().get("token") == key:
+        bad.append("rotating returned the same token -- every link ever sent is still "
+                   "live, which is the one thing this button exists to prevent")
+    fourth = PREFIX + "late_" + uuid.uuid4().hex[:6]
+    show("POST .../join  with the OLD key",
+         requests.post(f"{base}/api/challenges/{cid}/join",
+                       headers={"Authorization": "Bearer " + mint(fourth)},
+                       json={"user_id": fourth, "token": key}, timeout=60).status_code, 403)
+    # The person it was rotated to protect must not be the person it locks out.
+    show("GET  .../dashboard  as a member who joined BEFORE the reset",
+         requests.get(f"{base}/api/challenges/{cid}/dashboard",
+                      headers=T, timeout=60).status_code, 200)
 
     # Tidy up after ourselves. A check that leaves two extra names on a live roster is
     # exactly the litter reap_test_users.py exists to sweep.

@@ -262,8 +262,8 @@
      findable rather than prominent, and they sit under the roster they act on. */
   .exits{display:flex;flex-wrap:wrap;gap:6px;padding:8px 14px 0}
   .exits:empty{display:none}
-  .exits .rm{font-size:11px;color:var(--dim)}
-  .exits .rm[data-armed="1"]{color:var(--blocked);border-color:var(--blocked)}
+  .exits button{font-size:11px;color:var(--dim)}
+  .exits button[data-armed="1"]{color:var(--blocked);border-color:var(--blocked)}
   /* A save that fails silently feels identical to a tool that never persisted --
      you find out days later that the log is empty. */
   .savewarn{background:rgba(234,67,53,.12);border:1px solid var(--blocked);
@@ -583,6 +583,10 @@ let sessionId = null;
 //: The id someone sent you. Kept separately and never cleared, because "not in your
 //: list" and "not a real quest" are different things and only one of them is a dead end.
 const invitedId = new URLSearchParams(location.search).get('id');
+//: The secret half of the link. `null` when the URL has no `k=` at all, which is a
+//: different situation from a wrong key and gets a different message: one is "that
+//: link was retired", the other is "this was never an invite".
+const invitedKey = new URLSearchParams(location.search).get('k');
 let challengeId = invitedId;
 let selected = null, lastJournal = -1, busy = false;
 //: Kept around so "Copy for Claude" can package a step with the goal it serves and
@@ -1726,6 +1730,10 @@ function drawPartyExits(people, others) {
       rows.push(`<button class="ghost rm" data-uid="${esc(m.id)}">Remove ${
         esc(m.name || m.id)}</button>`);
     }
+    //: Removing someone takes back their seat. This takes back every link you have
+    //: ever sent, which is the only thing that helps once a link is already out of
+    //: your hands. Owner only, and it does not touch anyone already on the roster.
+    if (challengeId) rows.push('<button class="ghost rot">Reset invite link</button>');
   } else if (people.some(m => m.id === userId) && challengeId) {
     rows.push(`<button class="ghost rm" data-uid="${esc(userId)}">Leave this quest</button>`);
   }
@@ -1758,14 +1766,53 @@ function drawPartyExits(people, others) {
       } catch (e) { b.disabled = false; console.error(e); }
     };
   });
+
+  const rot = box.querySelector('button.rot');
+  if (rot) rot.onclick = async () => {
+    // Same two-click arming as removal, and for the same reason: this quietly breaks
+    // links other people are holding, so it should not happen on a mis-click.
+    if (rot.dataset.armed !== '1') {
+      rot.dataset.armed = '1';
+      rot.textContent = 'Reset it? Old links stop working';
+      setTimeout(() => {
+        if (rot.dataset.armed === '1') {
+          rot.dataset.armed = '0';
+          rot.textContent = 'Reset invite link';
+        }
+      }, 5000);
+      return;
+    }
+    rot.disabled = true;
+    try {
+      await api(`/challenges/${challengeId}/invite/rotate`, { method: 'POST' });
+      rot.textContent = 'Done — hit Invite for the new link';
+    } catch (e) {
+      console.error(e);
+      rot.textContent = 'Could not reset';
+    }
+    setTimeout(() => {
+      rot.disabled = false; rot.dataset.armed = '0';
+      rot.textContent = 'Reset invite link';
+    }, 4000);
+  };
 }
 
 //: An invite is a link to this exact challenge. The teammate keeps their own user id
 //: but the server files their work under the challenge's group, so their discoveries
 //: land in everyone's Party Knowledge. See _group_id() in services/tools.py.
-$('invite').onclick = e => {
+//: The link carries a secret now. Fetched at copy time rather than cached, so a link
+//: copied after somebody hit Reset is the NEW one -- a stale token in a variable would
+//: hand out a link that has just been deliberately killed.
+$('invite').onclick = async e => {
   if (!challengeId) return copyText('', e.target);
-  copyText(location.origin + location.pathname + '?id=' + challengeId, e.target);
+  const base = location.origin + location.pathname + '?id=' + challengeId;
+  try {
+    const { token } = await api(`/challenges/${challengeId}/invite`);
+    copyText(token ? `${base}&k=${encodeURIComponent(token)}` : base, e.target);
+  } catch (err) {
+    console.error(err);
+    copyText(base, e.target);   // better a link that needs a re-send than no link
+  }
 };
 
 //: Announce yourself once per challenge. Without this the roster only updated when the
@@ -1873,6 +1920,16 @@ function offerToJoin() {
   joinOffered = challengeId;
   $('title').className = 'empty';
   $('title').textContent = 'someone invited you to a quest';
+  //: No key in the URL means this is not an invite -- it is a bare id somebody typed,
+  //: guessed or kept from an older link. Offering a Join button would send them into a
+  //: 403 they have no way to fix, and "could not join" reads like a broken app rather
+  //: than a link that has been deliberately retired.
+  if (invitedKey === null) {
+    bubble('bot', 'warden',
+      'This link is missing its invite key, or the key has been reset. Ask whoever ' +
+      'sent it for a fresh link — resetting is how someone takes a leaked link back.');
+    return;
+  }
   const node = bubble('bot', 'warden',
     'You have been invited to a quest. Join it to see the map, the journal and the ' +
     'tools that have already been built for it.');
@@ -1886,7 +1943,7 @@ function offerToJoin() {
     try {
       await api(`/challenges/${challengeId}/join`, {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ user_id: userId }),
+        body: JSON.stringify({ user_id: userId, token: invitedKey || '' }),
       });
       joined = challengeId;
       node.remove();

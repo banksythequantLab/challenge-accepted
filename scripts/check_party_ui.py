@@ -43,9 +43,17 @@ def open_as(browser, base: str, user: str, url: str):
         viewport={"width": 1440, "height": 900},
         permissions=["clipboard-read", "clipboard-write"],
     )
+    # Guarded, because `add_init_script` runs in EVERY frame in the context -- including
+    # the sandboxed iframe a tool opens in, where touching localStorage throws
+    # `lacks the 'allow-same-origin' flag`. Unguarded, this check reported its own
+    # fixture as a page error in the product, on a tool whose source does not mention
+    # storage at all. A test fixture that runs inside the thing under test has to be as
+    # careful as the thing under test.
     ctx.add_init_script(f"""
-        localStorage.setItem('ca_user', {user!r});
-        localStorage.setItem('ca_group', 'grp_' + {user!r});
+        try {{
+          localStorage.setItem('ca_user', {user!r});
+          localStorage.setItem('ca_group', 'grp_' + {user!r});
+        }} catch (e) {{}}
     """)
     page = ctx.new_page()
     page.goto(url, wait_until="networkidle", timeout=90000)

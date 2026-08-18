@@ -26,6 +26,13 @@ python main.py                     # http://localhost:8080/app
   the path a real teammate takes, and it is the one that is tested. The invite link is
   now *sign in → join → see*, so the second window shows a **Join** step before the map
   appears — that beat is the product working, not a snag. Say so out loud.
+
+  **Do not hand-type the link.** It carries a key now (`?id=...&k=...`) and the id
+  alone gets a polite refusal, not a quest. That refusal is worth 10 seconds of camera
+  time if you have it: paste the link with the key stripped, show the *"ask whoever
+  sent it for a fresh one"* message, then hit **Reset invite link** in the Party pane
+  and point out that every link you have ever sent just died while nobody already on
+  the roster moved. It is the difference between a membership wall and a real one.
 - **min-instances=1** on Cloud Run if demoing the deployed URL. A cold start is several
   seconds of dead air.
 - **Pre-run the challenge once** so the tools already exist. Then re-run the FORGE beat

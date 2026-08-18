@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import secrets
 import threading
 import uuid
 from datetime import datetime, timezone
@@ -167,6 +168,33 @@ class Store:
         }
         self._put("challenges", cid, doc)
         return cid
+
+    def invite_token(self, challenge_id: str, rotate: bool = False) -> str:
+        """The secret half of an invite link. Minted on first ask, replaced on rotate.
+
+        The link used to be the challenge id alone, which made it permanent: forward it
+        once, or paste it in a screenshot, and that is access to somebody's plan for
+        good. The only remedy was eviction, which requires noticing.
+
+        An approval step was the other candidate and it is worse on both counts. It
+        puts a person in the loop on the one beat that has to be instant -- a teammate
+        opening a link and being met by what the party already knows -- and it still
+        cannot un-send a link that has already leaked. A rotatable secret can: one
+        click and every link ever sent is dead, while everyone already on the roster
+        stays exactly where they are.
+
+        Minted lazily so challenges created before this existed are not broken
+        wholesale. What DOES break is their old bare links, and that is the point.
+        """
+        doc = self.get("challenges", challenge_id)
+        if not doc:
+            return ""
+        token = str(doc.get("invite_token") or "")
+        if rotate or not token:
+            token = secrets.token_urlsafe(16)
+            self._patch("challenges", challenge_id,
+                        {"invite_token": token, "invite_rotated_at": _now()})
+        return token
 
     def put_node(self, challenge_id: str, node: dict[str, Any]) -> str:
         nid = f"{challenge_id}:{node['id']}"

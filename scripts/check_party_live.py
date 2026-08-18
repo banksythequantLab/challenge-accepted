@@ -229,8 +229,12 @@ def main(base: str) -> int:
     # group id. The server works the party out from the challenge, or the invite link
     # would have to carry a secret the user could not have.
     if _AUTH:
+        # The invite link has a secret half now, and Dana cannot read it herself --
+        # `GET /invite` is members-only. So it comes from Derek, which is the real
+        # shape of an invitation: somebody who is already in hands you the link.
+        key = _get(base, f"/api/challenges/{cid}/invite", user=derek).get("token")
         joined = json.loads(_post(base, f"/api/challenges/{cid}/join",
-                                  {"user_id": dana}, user=dana))
+                                  {"user_id": dana, "token": key}, user=dana))
         print(f"    joined -> {joined.get('group_id')}")
 
     said, calls = _say(base, dana, a_sid, DANA_ASKS)

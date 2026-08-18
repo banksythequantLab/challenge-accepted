@@ -62,9 +62,12 @@ def main() -> int:
     # Put the teammate on the roster through the API rather than the UI. Joining is
     # already proven elsewhere; mixing it in here would mean a failure could be either
     # bug and the check could not say which.
+    key = requests.get(f"{base}/api/challenges/{cid}/invite",
+                       headers={"Authorization": "Bearer " + mint(owner)},
+                       timeout=60).json().get("token")
     requests.post(f"{base}/api/challenges/{cid}/join",
                   headers={"Authorization": "Bearer " + mint(mate)},
-                  json={"user_id": mate}, timeout=60)
+                  json={"user_id": mate, "token": key}, timeout=60)
     _p(f"target : {url}\nowner  : {owner}\nmate   : {mate}\n")
 
     with sync_playwright() as pw:

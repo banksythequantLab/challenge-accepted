@@ -13,6 +13,7 @@ you are recording a video at 2am.
 from __future__ import annotations
 
 import json
+import secrets
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -40,6 +41,12 @@ class JoinIn(BaseModel):
                     "roster is built from the verified token, because honouring a "
                     "client's claim here would let anyone add anyone to any party. "
                     "Still load-bearing with auth off, e.g. a local dev server.")
+    token: str = Field(
+        default="",
+        description="The secret half of the invite link (`?k=`). Required to join a "
+                    "challenge you are not already on. Not required to re-announce "
+                    "yourself if you are already a member -- otherwise rotating the "
+                    "link would lock out the people it was rotated to protect.")
 
 
 #: Bytes of JSON a single tool may save per person. Generous for a season of training
@@ -297,6 +304,23 @@ def join_challenge(challenge_id: str, body: JoinIn,
     if not group_id:
         raise HTTPException(status_code=409, detail="Challenge has no group")
     uid = caller.uid if auth.required() else body.user_id
+
+    # The link has a secret half now, and this is where it earns its keep. Without it
+    # the id alone was the credential: forward the link once and that is access to
+    # somebody's plan forever, with eviction-after-you-notice as the only remedy.
+    #
+    # Members skip the check. Rotating a link is something you do BECAUSE it leaked,
+    # and locking out the people it was rotated to protect would make the button
+    # unusable at the moment it matters.
+    already = uid in _members(challenge) or uid == str(challenge.get("owner_id") or "")
+    if auth.required() and not already:
+        expected = str(challenge.get("invite_token") or "")
+        if not expected or not secrets.compare_digest(body.token or "", expected):
+            raise HTTPException(
+                status_code=403,
+                detail="This invite link is no longer valid. Ask whoever sent it for "
+                       "a fresh one -- links can be reset, and old ones stop working.")
+
     if auth.required():
         # Written on every join so a name change in the Google account shows up, and
         # so the roster can render people without a second lookup service.
@@ -304,6 +328,39 @@ def join_challenge(challenge_id: str, body: JoinIn,
                              "picture": caller.picture})
     store.join_group(group_id, uid)
     return {"status": "ok", "group_id": group_id, "party": _party(challenge)}
+
+
+@router.get("/challenges/{challenge_id}/invite")
+def get_invite(challenge_id: str,
+               caller: auth.Caller = Depends(current)) -> dict[str, Any]:
+    """The current invite secret, for anyone already on the party.
+
+    Members, not just the owner: a teammate pulling in a third person is the ordinary
+    way a party grows, and making them route it through the founder would be a
+    workflow rule pretending to be a security one. Anyone who can read the plan can
+    already copy it out; what the token controls is who gets a live seat.
+    """
+    _mine(challenge_id, caller)
+    return {"challenge_id": challenge_id, "token": store.invite_token(challenge_id)}
+
+
+@router.post("/challenges/{challenge_id}/invite/rotate")
+def rotate_invite(challenge_id: str,
+                  caller: auth.Caller = Depends(current)) -> dict[str, Any]:
+    """Kill every invite link ever sent for this challenge. Owner only.
+
+    Owner only, unlike reading it. Reading the token lets you grow the party; rotating
+    it takes a capability away from everyone the owner has already handed it to, and
+    that is the founder's call. Nobody currently on the roster is affected -- they are
+    members, and members do not need the link.
+    """
+    challenge = _challenge_or_404(challenge_id)
+    if auth.required() and caller.uid != str(challenge.get("owner_id") or ""):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the person who started this quest can reset its invite link.")
+    return {"challenge_id": challenge_id,
+            "token": store.invite_token(challenge_id, rotate=True)}
 
 
 @router.delete("/challenges/{challenge_id}/party/{user_id}")
