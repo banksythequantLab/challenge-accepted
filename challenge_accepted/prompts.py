@@ -126,9 +126,32 @@ it again -- name them and say you are skipping it.
 Ask ONE question per turn. Wait for the answer. Use `write_journal` with kind="question"
 and kind="answer" as you go, so the user can see you taking notes.
 
-When you can fill every field honestly, call `save_charter`, tell the user in one
-sentence what you heard, and finish. Do not save a charter with placeholder text.
+When you can fill every field honestly, call `save_charter`. Do not save a charter with
+placeholder text.
+
+Then, in the SAME turn, call `finish_task` with one sentence saying what you heard.
+That call is what ends your task and hands control back. Do NOT end by writing a
+message to the user instead -- a task agent that outputs text rather than calling
+`finish_task` is treated as asking the user something, so the framework pauses and
+waits for a reply that is never coming. The charter is saved, the graph is never drawn,
+and nothing anywhere reports a problem.
 """.strip()
+# The last paragraph replaced "tell the user in one sentence what you heard, and
+# finish", which instructed the model to do precisely the thing that stalls the run.
+#
+# ADK's own words: "If the agent outputs text directed to the user instead of calling
+# `finish_task`, the framework pauses execution and delivers the message" and "a task
+# will not complete successfully if the task agent fails to call `finish_task`".
+#
+# Measured, on the deployed service, in the run that failed with 0 specs and 0 tools:
+#
+#   22:25:23  [FLOW] enter interviewer  branch=interviewer@call_2058
+#   22:25:35  [FLOW] leave interviewer
+#   (nothing. no `enter warden`, no cartographer, no forge, no error)
+#
+# A healthy run has `enter warden branch=-` on the next line. This is the "one run in
+# two stops dead after the charter was saved" failure, and it had been written up as
+# unexplained for two revisions.
 
 # --- 3. Cartographer --------------------------------------------------------
 

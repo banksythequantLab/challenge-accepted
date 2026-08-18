@@ -186,6 +186,12 @@ def _tool_called(tool: Any, args: dict, tool_context: Any):
         _trace(f"handoff -> {target}")
     else:
         turn["tools"].append(name)
+        # Logged as it happens, not only in the end-of-turn summary. The summary fires
+        # on the root agent's exit -- and the failures worth diagnosing are the ones
+        # where the root never exits, so the summary is exactly the line you do not get.
+        # Two revisions were spent unable to answer "did the Interviewer call
+        # finish_task?" for want of this.
+        _trace(f"tool {name} ({_name(tool_context)})")
     return None
 
 
