@@ -204,6 +204,20 @@ For each tool you DO request, write a `smoke_test`: one concrete example input a
 exact expected output. Toolwright is not allowed to ship without passing it, so make it
 checkable, not aspirational.
 
+ONE COPY, OR ONE PER PERSON?
+
+Set `shared=true` only when a single record for the whole party IS the tool: a cost
+split, a who-is-bringing-what list, a booking board, a rota, a shared shortlist people
+add to. Everyone sees the same copy and everyone can edit it.
+
+Leave it false -- the default -- for anything holding one person's own numbers or
+progress: their training log, their practice scores, their packing checklist, their
+budget. On a shared copy, one teammate ticking their own boxes unticks yours, and they
+will not know they did it.
+
+Most tools are personal. If you cannot name the thing the party is coordinating
+through this tool, it is personal.
+
 REJECTED TOOLS ARE INSTRUCTIONS, NOT HISTORY.
 
 If the user has thumbed anything down, it appears at the end of this prompt under

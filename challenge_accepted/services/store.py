@@ -223,28 +223,83 @@ class Store:
         self._put("tools", tid, doc)
         return tid
 
-    def get_tool_state(self, tool_id: str, user_id: str) -> dict[str, Any]:
-        """Whatever a tool has saved for this person. Empty dict when it has saved none.
+    @staticmethod
+    def tool_state_key(tool_id: str, user_id: str, shared: bool) -> str:
+        """Where a tool's saved state lives.
+
+        Two scopes, and which one a tool gets is decided at build time by the
+        Quartermaster (`ToolSpec.shared`), not by whoever opens it -- so the party
+        cannot end up half on one copy and half on another.
+
+        Personal (the default) is keyed by user: a tracker holds YOUR mileage and a
+        checklist holds what YOU have ticked, and merging those across a party would
+        mean a teammate silently unticking your boxes.
+
+        Shared is keyed by the tool alone, and is the whole point of a split ledger or
+        a who-is-bringing-what list: one record, everyone editing it. `:party` is not a
+        valid uid (uids come from Firebase), so the two namespaces cannot collide.
+        """
+        return f"{tool_id}:{'party' if shared else user_id}"
+
+    def get_tool_state(self, tool_id: str, user_id: str,
+                       shared: bool = False) -> dict[str, Any]:
+        """Whatever a tool has saved, with the metadata a second editor needs.
 
         Tools run in a sandboxed iframe with no same-origin privilege, which means no
         storage of their own -- so a tracker built to log a training week forgot it the
         moment the modal closed. "Log your runs here" that forgets is not a tool, it is
         a form.
 
-        Scoped to (tool, user) rather than to the party. A tracker holds YOUR mileage
-        and a checklist holds what YOU have ticked; merging those across a party would
-        be a shared editing model nobody asked for, and the first surprise would be a
-        teammate silently unticking your boxes. Party-wide state is what `group_facts`
-        and the graph already are.
+        Returns `{data, version, updated_by, updated_at}`. `version` is 0 when nothing
+        has been saved yet, and it is what makes a shared tool safe to hand to two
+        people: a save carrying a stale version is refused rather than applied.
         """
-        return (self.get("tool_state", f"{tool_id}:{user_id}") or {}).get("data") or {}
+        doc = self.get("tool_state", self.tool_state_key(tool_id, user_id, shared)) or {}
+        return {
+            "data": doc.get("data") or {},
+            "version": int(doc.get("version") or 0),
+            "updated_by": doc.get("updated_by") or "",
+            "updated_at": doc.get("updated_at") or "",
+        }
 
     def put_tool_state(self, challenge_id: str, tool_id: str, user_id: str,
-                       data: dict[str, Any]) -> None:
-        self._put("tool_state", f"{tool_id}:{user_id}", {
-            "challenge_id": challenge_id, "tool_id": tool_id, "user_id": user_id,
-            "data": data, "updated_at": _now(),
-        })
+                       data: dict[str, Any], shared: bool = False,
+                       expected_version: Optional[int] = None) -> dict[str, Any]:
+        """Save it, refusing a write that would clobber someone else's.
+
+        `expected_version` is the version the caller last read. Pass it and the write
+        is a compare-and-set: `{"status": "conflict", ...}` plus the current state if
+        the stored version has moved on. Pass None and it is last-write-wins, which is
+        what a personal tool wants -- there is nobody else to race.
+
+        **The comparison is read-then-write, not a transaction.** Two saves landing
+        within the same few milliseconds can still both pass the check and one will be
+        lost silently. What this reliably catches is the case that actually happens:
+        two people with the same tool open for minutes, one saving after the other. A
+        real transaction is the fix if this ever guards something that matters more
+        than a packing list; saying so here is better than implying an atomicity this
+        does not have.
+        """
+        key = self.tool_state_key(tool_id, user_id, shared)
+        with self._lock:
+            current = self._read_locked("tool_state", key) or {}
+            version = int(current.get("version") or 0)
+            if expected_version is not None and expected_version != version:
+                return {
+                    "status": "conflict",
+                    "version": version,
+                    "data": current.get("data") or {},
+                    "updated_by": current.get("updated_by") or "",
+                    "updated_at": current.get("updated_at") or "",
+                }
+            doc = {
+                "challenge_id": challenge_id, "tool_id": tool_id,
+                "user_id": user_id, "scope": "party" if shared else "user",
+                "data": data, "version": version + 1,
+                "updated_by": user_id, "updated_at": _now(),
+            }
+            self._write_locked("tool_state", key, doc)
+        return {"status": "ok", "version": version + 1}
 
     def put_user(self, uid: str, profile: dict[str, Any]) -> None:
         """The name and avatar behind a uid, as Google stated them.
@@ -466,6 +521,28 @@ class Store:
             return
         with self._lock:
             self._mem[collection][doc_id] = doc
+
+    def _read_locked(self, collection: str, doc_id: str) -> Optional[dict[str, Any]]:
+        """`get` for a caller that already holds `self._lock`. See `_write_locked`."""
+        if self._client:
+            snap = self._client.collection(collection).document(doc_id).get()
+            return snap.to_dict() if snap.exists else None
+        return self._mem[collection].get(doc_id)
+
+    def _write_locked(self, collection: str, doc_id: str, doc: dict[str, Any]) -> None:
+        """`_put` for a caller that already holds `self._lock`.
+
+        `threading.Lock` is not reentrant, and BOTH `get` and `_put` take it -- so a
+        compare-and-set that held the lock across a read and a write deadlocked the
+        whole test suite on the first call, in a way that looks like a hang rather than
+        a failure. It deadlocks only on the in-memory backend, which is the one the
+        tests use and the one production never touches: the exact shape of bug that
+        passes review and stops a demo.
+        """
+        if self._client:
+            self._client.collection(collection).document(doc_id).set(doc)
+            return
+        self._mem[collection][doc_id] = doc
 
     def _patch(self, collection: str, doc_id: str, patch: dict[str, Any]) -> None:
         if self._client:

@@ -12,6 +12,7 @@ and the model reads the status and adapts.
 
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Optional
 
@@ -275,6 +276,31 @@ def save_goal_graph(nodes: list[dict], rationale: str,
     return {"status": "ok", "node_count": len(nodes), "superseded": retired}
 
 
+def _spec_is_shared(tool_context: ToolContext, node_id: str) -> bool:
+    """Is this node's tool one record for the whole party, or one per person?
+
+    Read off the Quartermaster's spec in session state rather than taken as an argument
+    to `save_tool`. A Toolwright would have to echo the flag back correctly on every
+    build for an argument to be trustworthy, and a boolean the model can quietly drop
+    is a boolean that decides, at random, whether your teammates can see your ledger.
+    The spec already carries it and the spec is not written by the worker.
+
+    `tool_specs` can arrive as a dict or as a JSON string depending on the model path
+    -- the Dispatcher handles the same two shapes for the same reason.
+    """
+    raw = tool_context.state.get("tool_specs")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (ValueError, TypeError):
+            return False
+    specs = (raw or {}).get("specs") if isinstance(raw, dict) else None
+    for spec in specs or []:
+        if isinstance(spec, dict) and spec.get("node_id") == node_id:
+            return bool(spec.get("shared"))
+    return False
+
+
 def save_tool(node_id: str, tool_type: str, name: str, source: str, usage: str,
               smoke_test_passed: bool, smoke_test_output: str,
               tool_context: ToolContext) -> dict[str, Any]:
@@ -296,10 +322,11 @@ def save_tool(node_id: str, tool_type: str, name: str, source: str, usage: str,
     cid = _challenge_id(tool_context)
     if not cid:
         return {"status": "no_challenge", "message": "No challenge open."}
+    shared = _spec_is_shared(tool_context, node_id)
     tid = store.put_tool(cid, node_id, {
         "type": tool_type, "name": name, "source": source, "usage": usage,
         "smoke_test_passed": smoke_test_passed, "smoke_test_output": smoke_test_output,
-        "degraded": not smoke_test_passed,
+        "degraded": not smoke_test_passed, "shared": shared,
     })
     store.add_journal(cid, {"actor": "Toolwright", "kind": "build", "node_id": node_id,
                             "text": f"Built {tool_type} '{name}' "

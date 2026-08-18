@@ -115,6 +115,19 @@ class ToolSpec(BaseModel):
         default=None,
         description="A concrete example input and the expected output. Toolwright must pass this.",
     )
+    shared: bool = Field(
+        default=False,
+        description=(
+            "True only when ONE record for the whole party is the point of the tool -- "
+            "a split ledger, a who-is-bringing-what list, a booking board, a shared "
+            "roster. Everyone sees and edits the same copy. False for anything holding "
+            "one person's own numbers or progress, where a shared copy would mean "
+            "teammates overwriting each other. When in doubt, false."
+        ),
+    )
+    # `bool = False` rather than `Optional[bool] = None` on purpose: ADK validates an
+    # output_schema with `model_dump(exclude_none=True)`, so a None would be dropped
+    # from session state entirely and the key would be missing rather than False.
 
 
 class BuiltTool(BaseModel):

@@ -111,7 +111,9 @@ def test_oversized_state_is_refused_rather_than_truncated(app_as, tool):
     r = app_as(MINE).put(f"/api/challenges/{cid}/tools/{tid}/state", json={"state": big})
     assert r.status_code == 413
     assert str(TOOL_STATE_LIMIT) in r.json()["detail"]
-    assert store.get_tool_state(tid, MINE) == {}, "the oversized write partially landed"
+    saved = store.get_tool_state(tid, MINE)
+    assert saved["data"] == {}, "the oversized write partially landed"
+    assert saved["version"] == 0, "a refused write must not burn a version"
 
 
 def test_saving_twice_replaces_rather_than_merges(app_as, tool):

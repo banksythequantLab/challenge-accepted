@@ -60,6 +60,11 @@ class ToolStateIn(BaseModel):
         default_factory=dict,
         description="Whatever the tool wants to remember for this person. Opaque to "
                     "the server -- it is the tool's own shape, not ours.")
+    version: Optional[int] = Field(
+        default=None,
+        description="The version this client last read. Sent for a shared tool so a "
+                    "save that would overwrite a teammate's is refused (409) instead "
+                    "of applied. Omit for last-write-wins.")
 
 
 class FeedbackIn(BaseModel):
@@ -122,6 +127,33 @@ def _party(challenge: dict[str, Any]) -> list[dict[str, str]]:
             "picture": str(profile.get("picture") or ""),
         })
     return out
+
+
+def _display_name(uid: str) -> str:
+    """A uid as a person, falling back to the truncated id rather than to nothing.
+
+    Same rule as `_party`: never render a bare uid where a name exists, never render
+    an empty string where a uid exists. "saved by " with nothing after it reads as a
+    bug even when the save was fine.
+    """
+    if not uid:
+        return ""
+    profile = store.get("users", uid) or {}
+    return str(profile.get("name") or uid[:8])
+
+
+def _tool_is_shared(challenge_id: str, tool_id: str) -> bool:
+    """Is this tool one record for the party, or one per person?
+
+    Read from the stored tool, which got it from the Quartermaster's spec at build
+    time. Deliberately NOT a query parameter: if the caller chose the scope, two
+    teammates could open the same tool against different keys and each would see a
+    consistent, empty, private copy of what was supposed to be a shared list -- a
+    failure that looks exactly like "nobody has filled it in yet".
+    """
+    tool = next((t for t in store.list_tools(challenge_id) if t.get("id") == tool_id),
+                None)
+    return bool((tool or {}).get("shared"))
 
 
 def _depth(node_id: str, by_id: dict[str, dict], seen: Optional[set[str]] = None) -> int:
@@ -431,7 +463,19 @@ def get_tool_state(challenge_id: str, tool_id: str,
     source running in there was written by a model.
     """
     _mine(challenge_id, caller)
-    return {"tool_id": tool_id, "state": store.get_tool_state(tool_id, caller.uid)}
+    shared = _tool_is_shared(challenge_id, tool_id)
+    saved = store.get_tool_state(tool_id, caller.uid, shared)
+    return {
+        "tool_id": tool_id,
+        "state": saved["data"],
+        "shared": shared,
+        "version": saved["version"],
+        # Who last touched it, by name where we have one. Only meaningful for a shared
+        # tool, and the whole reason a second editor can tell "this changed under me"
+        # from "I misremembered what I typed".
+        "updated_by": _display_name(saved["updated_by"]) if shared else "",
+        "updated_at": saved["updated_at"],
+    }
 
 
 @router.put("/challenges/{challenge_id}/tools/{tool_id}/state")
@@ -446,15 +490,31 @@ def put_tool_state(challenge_id: str, tool_id: str, body: ToolStateIn,
     than silently truncated.
     """
     _mine(challenge_id, caller)
-    if not any(t.get("id") == tool_id for t in store.list_tools(challenge_id)):
+    tool = next((t for t in store.list_tools(challenge_id) if t.get("id") == tool_id),
+                None)
+    if tool is None:
         raise HTTPException(status_code=404, detail="No such tool on this challenge")
     size = len(json.dumps(body.state))
     if size > TOOL_STATE_LIMIT:
         raise HTTPException(
             status_code=413,
             detail=f"Tool state is {size} bytes; the limit is {TOOL_STATE_LIMIT}.")
-    store.put_tool_state(challenge_id, tool_id, caller.uid, body.state)
-    return {"status": "ok", "bytes": size}
+    shared = bool(tool.get("shared"))
+    result = store.put_tool_state(challenge_id, tool_id, caller.uid, body.state,
+                                  shared=shared, expected_version=body.version)
+    if result["status"] == "conflict":
+        # 409 with the winning state attached, not a bare error. The client cannot
+        # recover from "no" alone -- it needs what it is now behind, and who put it
+        # there, or the only honest thing it can tell the user is "something happened".
+        raise HTTPException(status_code=409, detail={
+            "message": "A teammate saved this while you had it open.",
+            "state": result["data"],
+            "version": result["version"],
+            "updated_by": _display_name(result["updated_by"]),
+            "updated_at": result["updated_at"],
+        })
+    return {"status": "ok", "bytes": size, "shared": shared,
+            "version": result["version"]}
 
 
 @router.get("/challenges/{challenge_id}/graph")
@@ -485,6 +545,7 @@ def _build_graph(raw: list[dict[str, Any]], all_tools: list[dict[str, Any]],
             "name": tool.get("name"),
             "type": tool.get("type"),
             "degraded": bool(tool.get("degraded")),
+            "shared": bool(tool.get("shared")),
         })
 
     column_counts: dict[int, int] = {}

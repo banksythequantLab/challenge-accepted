@@ -386,6 +386,12 @@
     border-color:rgba(255,92,92,.35)}
   .badge.ok{background:rgba(61,214,140,.12);color:var(--done);
     border-color:rgba(61,214,140,.35)}
+  /* Shared state is the one badge that changes what a click DOES rather than
+     describing how the tool was built, so it reads as blue-ish "info" and keeps its
+     mixed case -- "last saved by Dana" in caps looks like an alert. */
+  .badge.shared{background:rgba(122,162,255,.13);color:#7AA2FF;
+    border-color:rgba(122,162,255,.35);text-transform:none;letter-spacing:.2px;
+    font-weight:600}
   .sheet .usage{padding:14px 20px;color:var(--prose);font-size:13px;line-height:1.6;
     border-bottom:1px solid var(--line);flex:none}
   .sheet .stage{flex:1;min-height:0;overflow:auto;padding:0}
@@ -530,6 +536,7 @@
       <h2 id="m-name"></h2>
       <span class="badge" id="m-type"></span>
       <span class="badge" id="m-smoke"></span>
+      <span class="badge shared" id="m-shared" style="display:none"></span>
       <button class="ghost" id="m-close" style="margin-left:auto">Close</button>
     </header>
     <div class="usage" id="m-usage"></div>
@@ -610,7 +617,12 @@ async function api(path, opts) {
     // "sign in" and "you have not joined this quest", which are things the person can
     // actually do something about.
     const detail = await r.json().then(j => j.detail).catch(() => '');
-    const e = new Error(path + ' -> ' + r.status + (detail ? ': ' + detail : ''));
+    // A detail can be a structured object, not just a string -- the 409 on a shared
+    // tool carries the winning state so the client can recover. Stringifying that into
+    // the message gives "[object Object]" in every console line, so only text goes in
+    // the message; callers that care read `e.detail`.
+    const note = typeof detail === 'string' ? detail : (detail && detail.message) || '';
+    const e = new Error(path + ' -> ' + r.status + (note ? ': ' + note : ''));
     e.status = r.status;
     e.detail = detail;
     throw e;
@@ -1413,20 +1425,31 @@ function withStorageShim(doc, state) {
 //: otherwise be a PUT per keystroke. 800ms is long enough to collapse typing and short
 //: enough that closing the modal deliberately (which flushes) is not the only way
 //: anything reaches the server.
+//: For a SHARED tool these two matter as much as the state itself. `statefulVersion`
+//: is what the server said when we loaded, and it rides along on every save so a
+//: teammate's edit cannot be silently overwritten by ours -- the server answers 409
+//: and hands back what it kept instead.
 let statefulTool = null, saveTimer = null, pendingState = null;
+let statefulShared = false, statefulVersion = 0;
 
 async function flushToolState() {
   clearTimeout(saveTimer);
   saveTimer = null;
   if (!statefulTool || pendingState === null || !challengeId) return;
   const body = pendingState;
+  const tool = statefulTool;
   pendingState = null;
   try {
-    await api(`/challenges/${challengeId}/tools/${statefulTool}/state`, {
+    const r = await api(`/challenges/${challengeId}/tools/${tool}/state`, {
       method: 'PUT', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ state: body }),
+      // Only a shared tool sends a version. A personal one has no second writer to
+      // race, and sending it would turn two tabs of your own into a conflict.
+      body: JSON.stringify(statefulShared ? { state: body, version: statefulVersion }
+                                          : { state: body }),
     });
+    if (typeof r.version === 'number') statefulVersion = r.version;
   } catch (e) {
+    if (e.status === 409) { toolStateConflict(tool, e); return; }
     // Loud, because a save that silently fails is the same experience as a tool that
     // never persisted: the user finds out days later that their log is empty.
     console.error('could not save tool state', e);
@@ -1434,6 +1457,48 @@ async function flushToolState() {
       ? 'This tool tried to save more than 64KB. Its entries are not being kept.'
       : 'Could not save this tool’s entries. They will be lost when you close it.');
   }
+}
+
+//: A shared tool changed under us. Reopening is the honest recovery: we have the
+//: teammate's version and ours, no way to merge two opaque blobs the tool defined,
+//: and silently picking one is the failure this whole mechanism exists to prevent.
+//: So: say who changed it, show theirs, and let the user redo their edit on top.
+function toolStateConflict(toolId, err) {
+  const d = (err && err.detail) || {};
+  const who = d.updated_by ? `${d.updated_by} saved` : 'A teammate saved';
+  const msg = `${who} this while you had it open. Reloading their version — your last change was not kept.`;
+  toolStateWarning(msg);
+  if (statefulTool !== toolId) return;
+  const t = toolsById[toolId];
+  if (!t) return;
+  setTimeout(async () => {
+    if (statefulTool !== toolId) return;
+    await renderTool(t);
+    //: Say it again after the re-render. `renderTool` empties the stage, which took
+    //: the explanation with it -- so the user watched their number turn into somebody
+    //: else's with nothing on screen to say why, which is the exact experience this
+    //: feature exists to prevent. Caught by check_shared_tool_ui.py, not by reading it.
+    toolStateWarning(msg);
+  }, 1200);
+}
+
+//: Whether a tool is shared is decided at build time and answered by the server, so
+//: this reads it off the state response rather than off the tool row -- the graph and
+//: the state endpoint could in principle disagree, and the one that decides where the
+//: bytes actually go is the one to believe.
+function adoptStateMeta(meta) {
+  statefulShared = !!(meta && meta.shared);
+  statefulVersion = (meta && typeof meta.version === 'number') ? meta.version : 0;
+  const badge = $('m-shared');
+  if (!badge) return;
+  if (!statefulShared) { badge.style.display = 'none'; return; }
+  badge.style.display = '';
+  // Naming the last editor is the point. "Shared" alone tells you the rules; "last
+  // saved by Dana" tells you whether the thing in front of you is news.
+  badge.textContent = meta.updated_by
+    ? `shared · last saved by ${meta.updated_by}`
+    : 'shared with the party';
+  badge.title = 'Everyone on this quest sees and edits the same copy.';
 }
 
 function toolStateWarning(text) {
@@ -1464,6 +1529,8 @@ async function renderTool(t) {
   stage.innerHTML = '';
   statefulTool = null;
   pendingState = null;
+  statefulShared = false;
+  statefulVersion = 0;
   clearTimeout(saveTimer);
 
   if (!src) {
@@ -1487,14 +1554,16 @@ async function renderTool(t) {
     // Load before render, not after. Handing the page its state a moment late means
     // it draws an empty tracker and then repopulates, and the user has already read
     // "no entries yet" and believed it.
-    let saved = {};
+    let saved = {}, meta = {};
     try {
       const r = await api(`/challenges/${challengeId}/tools/${t.id}/state`);
       saved = r.state || {};
+      meta = r;
     } catch (e) { console.error('could not load tool state', e); }
     if (stage.dataset.tool !== t.id) return;   // they closed it, or opened another
 
     statefulTool = t.id;
+    adoptStateMeta(meta);
     const f = document.createElement('iframe');
     f.id = 'frame';
     f.setAttribute('sandbox', 'allow-scripts allow-forms allow-modals');
@@ -1514,13 +1583,15 @@ async function renderTool(t) {
       //: you half-finished on your laptop was blank on your phone -- and the app was
       //: telling you nothing had been done. They go through the same per-user store
       //: the sandboxed tools use, so what you ticked follows YOU.
-      let done = [];
+      let done = [], meta = {};
       try {
         const r = await api(`/challenges/${challengeId}/tools/${t.id}/state`);
         done = Array.isArray(r.state && r.state.done) ? r.state.done : [];
+        meta = r;
       } catch (e) { console.error('could not load checklist ticks', e); }
       if (stage.dataset.tool !== t.id) return;
       statefulTool = t.id;
+      adoptStateMeta(meta);
       items.forEach((item, i) => {
         const row = document.createElement('label');
         row.className = 'check' + (done.includes(i) ? ' done' : '');
@@ -1554,6 +1625,10 @@ function openTool(id) {
 
   $('m-name').textContent = t.name || 'Tool';
   $('m-type').textContent = t.type || 'tool';
+  //: Hidden up front, not left over from the last tool. A tool with no state at all
+  //: never reaches `adoptStateMeta`, so without this a shared ledger's badge would
+  //: still be sitting above the next tool you opened.
+  $('m-shared').style.display = 'none';
 
   const smoke = $('m-smoke');
   if (t.degraded) {
