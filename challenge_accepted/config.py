@@ -52,26 +52,30 @@ MAX_NODES: int = int(os.getenv("CA_MAX_NODES", "20"))
 
 #: How many Toolwright workers run concurrently in the FORGE phase.
 #:
-#: Two, not four, and the number is measured rather than chosen. At four, the deployed
-#: service built 1, 3 and 1 tools out of 6, 7 and 6 specs across three runs: all four
-#: workers logged START with distinct specs, all four reached the model, exactly one
-#: made a second call, and `after_agent_callback` fired for NONE of them -- the
-#: signature of an exception inside the `asyncio.TaskGroup` that ParallelAgent runs the
-#: workers in, where one failure cancels its siblings mid-build. At two, the same
-#: scripted run built 7 of 7 twice in a row (revision 00050, 15:07 and 15:17), every
-#: worker reached END, the queue drained and the dispatcher escalated cleanly.
+#: Four. It was two for a while, and the story of why is worth keeping, because this
+#: number was once a wrong answer that looked like a right one.
 #:
-#: Embeddings (`CA_EMBED=off`) and prompt size (4,548 chars vs 1,833) were each ruled
-#: out by experiment first; neither changed the outcome at four. The underlying
-#: exception is still unidentified -- no RESOURCE_EXHAUSTED, no 429, and the ERROR logs
-#: show only OpenTelemetry context-teardown noise, which is a symptom of the
-#: cancellation and not its cause. So this is a floor that works, not a diagnosis.
-#: Raising it again needs a run that proves the cause is gone, not a hunch.
+#: At four, the deployed service built 1, 3 and 1 tools out of 6, 7 and 6 specs: all
+#: four workers logged START with distinct specs, all four reached the model, exactly
+#: one made a second call, and `after_agent_callback` fired for NONE of them. Halving
+#: the batch made it pass 7/7 twice, then 8/8, so two shipped as a "measured floor".
 #:
-#: Cost of the floor: four batches instead of two for a seven-node graph, about 8.5
-#: minutes instead of ~5. The LoopAgent already reseeds until the queue drains, so
-#: coverage is unaffected -- only wall-clock.
-FORGE_WORKERS: int = int(os.getenv("CA_FORGE_WORKERS", "2"))
+#: It was not the cause. A flow trace showed FORGE running inside the Cartographer's
+#: tool frame on every failure and never on a success -- a `mode="single_turn"`
+#: sub-agent transferring back to its parent, which resumes the parent INSIDE the
+#: child's frame, so everything it starts dies when that tool call closes. See
+#: `sub_agents/cartographer.py`. Two workers narrowed the window the bug needed; it
+#: never closed it.
+#:
+#: With that fixed (and the Interviewer's `finish_task` stall, see prompts.INTERVIEWER),
+#: four was re-measured: **5/5, 7/7, 6/6 and 6/6 on four consecutive live runs**, every
+#: worker reaching END, and 5m14s against ~8.5 minutes at two. So the batch goes back
+#: up and the demo gets three minutes back.
+#:
+#: The lesson worth more than the number: a change that makes a symptom go away three
+#: times running is still not a diagnosis. Two workers passed every test we had and was
+#: wrong about why.
+FORGE_WORKERS: int = int(os.getenv("CA_FORGE_WORKERS", "4"))
 
 
 def use_vertex_models() -> bool:
