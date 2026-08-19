@@ -34,6 +34,14 @@ You name something you want to be true that isn't yet. A team of nine agents:
 Everything learned lands in **goal-scoped group memory**. When a teammate opens the same
 challenge, their Coach opens with what you discovered — attributed to you by name.
 
+**The tools remember, and some of them remember for everybody.** A tool runs in a
+sandboxed iframe with no storage of its own, so the dashboard brokers its state: seeded
+in before the page runs, written back over `postMessage`, saved against your account. A
+training log is yours. A cost split is the party's — the Quartermaster decides which at
+build time, and a save that would overwrite a teammate's is refused with theirs
+attached, naming who changed it. One record where one record is the point, one each
+where it is not.
+
 You sign in with Google, and the party roster shows the people on it rather than machine
 ids. Dark and light themes; the app follows your machine and remembers if you disagree.
 
@@ -50,7 +58,7 @@ warden  (coordinator, gemini-3.6-flash)
 │   └── forge_loop      Loop
 │       ├── dispatcher      custom BaseAgent   deterministic slot assignment
 │       └── forge_workers   Parallel
-│           └── toolwright_0..3                build + smoke-test, concurrently
+│           └── toolwright_0..7                build + smoke-test, concurrently
 ├── coach           mode=task          CLIMB   one node at a time
 │   └── referee     AgentTool                  evidence check + feedback
 ├── archivist       mode=single_turn   —       takes the notes
@@ -196,6 +204,44 @@ don't call a model — which is the actual lesson.
   dispatcher assignments, per-worker START/END with slot contents, and every model call
   with its instruction size and content count. One env var, off by default.
 
+- **The FORGE regression that was never about concurrency.** The same shortfall came
+  back — 5 specs, 2 tools; 6 specs, 1 tool — and the obvious suspect was worker
+  parallelism, so we halved the batch. It got better. Three times running. That is
+  exactly what a race looks like and exactly what a narrowed window looks like, and we
+  could not tell them apart by staring at the code, so we stopped and built the tooling
+  instead: a flow tracer that logs every agent entry with its **branch**, every tool
+  call, and every `transfer_to_agent`. The answer was in the first trace.
+
+  ```
+  branch=cartographer@call_636196.forge_workers.toolwright_0   <- 5 specs, 2 tools
+  branch=cartographer@call_630649.forge_workers.toolwright_0   <- 6 specs, 1 tool
+  branch=forge_workers.toolwright_0                            <- 8 specs, 8 tools
+  ```
+
+  FORGE was running *inside the Cartographer's frame.* A `mode="single_turn"` sub-agent
+  is not a transfer target in ADK — the parent gets it as a **tool**, run in an isolated
+  sub-branch. But ADK still offers that child its parent as a transfer target, and when
+  the child takes it, the Warden resumes *inside the child's sub-branch* rather than
+  after it. Everything the Warden starts from there — the entire build phase — is
+  parented to a tool call that is about to return. When it does, FORGE dies underneath
+  it: workers issue a second model call, never reach `after_agent_callback`, the loop
+  never dispatches another batch, and **nothing logs an error**. Two lines fixed it
+  (`disallow_transfer_to_parent`, `disallow_transfer_to_peers` — finish and return, like
+  the tool it already was) and the workers went back up to 8. The lesson is the one we
+  keep re-learning: a change that makes a symptom go away three times running is still
+  not a diagnosis.
+
+- **A prompt that instructed the exact behaviour that hangs the framework.** A run
+  failed with 0 specs and 0 tools, and the trace showed the whole story in two lines:
+  `enter interviewer` at 22:25:23, `leave interviewer` at 22:25:35, and then nothing —
+  no `enter warden`, no Cartographer, no FORGE, no error. The Interviewer's prompt ended
+  with *"tell the user in one sentence what you heard, and finish."* A `mode="task"`
+  agent that emits text instead of calling `finish_task` doesn't finish; ADK **pauses**
+  and waits for a user reply that is never coming. We had written the stall into the
+  instructions ourselves, in the most natural-sounding sentence in the file. The prompt
+  now demands `save_charter` and `finish_task` in the same turn and says why in-line, so
+  the next person to make it friendlier reads the reason first.
+
 - **Three unrelated subsystems riding on one boolean.** `use_vertex()` gated sessions,
   memory *and* Cloud Trace. Switching on Memory Bank would therefore also have moved
   every conversation off our Firestore session service onto Agent Engine — nothing would
@@ -220,8 +266,8 @@ don't call a model — which is the actual lesson.
   per agent by comparing branch paths, and `_is_event_belongs_to_branch` opens with
   `if not invocation_branch or not event.branch: return True`. **The root agent has no
   branch.** So Warden does not get a filtered view of the conversation; it gets
-  everything, including four Toolwrights' `executableCode` events from deep inside
-  FORGE, each carrying an `id` Vertex refuses. The next time Warden spoke after a
+  everything, including every parallel Toolwright's `executableCode` events from deep
+  inside FORGE, each carrying an `id` Vertex refuses. The next time Warden spoke after a
   build, its own request contained them. Intermittent, invisible from the UI, and
   costly: one recorded run built a single tool where the run before it built seven.
   The traceback was what settled it — `runners.py:610 _drive_root_node` →
@@ -260,6 +306,23 @@ don't call a model — which is the actual lesson.
   bug and cost real time — the discipline that eventually pays is asking *"is the
   measurement wrong?"* before rewriting the thing being measured.
 
+- **We audited the checks themselves, and most of what they were reporting was noise.**
+  Having been burned three times, we stopped trusting the suite and ran every check
+  against the deployed service one at a time, treating each failure as a claim to be
+  proved rather than a bug to be fixed. **Six were wrong about a working product**: one
+  reported NO HANDOFF against a correct handoff; one claimed tool state didn't persist
+  when it did; one graded the Referee's *correct refusal* of weak evidence as a bug —
+  twice, because the first fix hardcoded one sport's idea of evidence; one encoded the
+  access model from before invite keys existed *and* snapshotted the page before the
+  dashboard arrived; two hardcoded a worker count that had since changed. **One had been
+  blind since the day we added sign-in** — every request 401'd and the check printed the
+  traceback and moved on, which is the second time this repo has shipped a check that
+  cannot fail. And the checks were hiding exactly one real defect: on any `/invite`
+  error the button copied a **keyless** link to the clipboard and said "Copied", so the
+  failure mode of sharing a party was handing someone a link guaranteed to 403. A check
+  that is wrong about a working product is worse than no check, because it spends the
+  attention you were saving for the real one.
+
 ## Accomplishments we're proud of
 
 - An agent that writes a tool, **executes it, iterates until its own smoke test passes**,
@@ -292,7 +355,7 @@ don't call a model — which is the actual lesson.
   near-black on a white page. `check_theme.py` reads the *rendered* luminance of every
   painted surface and fails if one stayed dark; `check_a11y.py` runs contrast in both
   themes (worst: 5.60:1 dark, 4.86:1 light, against a 4.5:1 floor).
-- **161 tests plus a live-check suite that signs in**, including a regression test for
+- **241 tests plus 33 live checks that sign in**, including a regression test for
   every bug above. The checks click the actual controls and read the clipboard, the
   iframe and the resulting prompt string back — `check_feedback.py` follows a
   thumbs-down all the way into the Quartermaster's instruction, because "the loop is
@@ -339,6 +402,14 @@ two files away: scoping the quest list to its owner was correct, and it silently
 invalidated the assumption an invite link depended on. **A change is not finished when
 the thing you changed works.**
 
+The sixth is the one that saved the most time once we finally did it: **when two theories
+predict the same symptom, stop guessing and build the instrument.** We spent days treating
+a FORGE shortfall as a concurrency race because halving the worker count improved it —
+which is equally consistent with narrowing a window you have not found. An afternoon spent
+writing a flow tracer that prints each agent's *branch* answered it in one run, and then
+went on to answer the next failure too. Instrumentation is not overhead you add after the
+bug; it is the thing that decides whether you get to have a diagnosis at all.
+
 ## What's next
 
 Challenge Packs — every completed graph is a template. Publish it, take 30%. Then per-node
@@ -368,10 +439,14 @@ Break-even at $29/seat is ~34 challenges per user per month — comfortably abov
   commercial launch.
 - Group memory is goal-scoped and works across users, but there is no per-node assignment
   or presence yet — two people can pick up the same node.
-- **Anyone with an invite link can join.** Joining is deliberate and authenticated, but
-  there is no approval step and no way to remove someone once they are on a party. For a
-  link you choose to send that is the intended behaviour; for a link that leaks it is
-  not, and we would not ship it to paying teams as-is.
+- ~~**Anyone with an invite link can join**, with no approval step and no way to remove
+  them.~~ **Fixed.** The link carries a rotatable key (`?id=…&k=…`): no key and a wrong
+  key are both 403, any member can pass the link on but only the owner can reset it, and
+  a reset kills the old key without touching anyone already on the roster. You can leave
+  a party, and leaving revokes access to the dashboard, the tools and the journal — what
+  you discovered stays, because your leaving does not make it untrue. An approval step
+  was the other candidate and loses twice: it puts a human in the loop on the beat that
+  has to be instant, and it still cannot un-send a link that has already gone.
 - **Challenges created before sign-in existed are unreachable.** They belong to anonymous
   localStorage ids that now map to nobody. We abandoned them rather than invent an owner
   for data we could not attribute.
@@ -380,6 +455,12 @@ Break-even at $29/seat is ~34 challenges per user per month — comfortably abov
 - **Memory Bank is personal recall, not the party's memory.** It scopes to
   `(app_name, user_id)`, so it carries what *you* said between *your* challenges. A
   teammate joining a party does not inherit it. The shared layer is `remember_group_fact`
-  → Firestore, read wholesale into the prompt, which will not scale past a few dozen
-  facts. Calling Memory Bank "shared team memory" would be the easiest overclaim in this
+  → Firestore. That used to be read wholesale into the prompt and would not have scaled
+  past a few dozen facts; it is now ranked by meaning (256-d embeddings, cosine against
+  the goal) and capped at 40, and the prompt carries the count it withheld so the model
+  says *"the team may know more"* rather than *"that is unknown"*. The honest remaining
+  limit is measured, not guessed: an old fact sharing no words with the goal can still
+  lose to newer noise, and `check_fact_budget_live.py` reports that rather than asserting
+  a guarantee the design cannot make. Calling Memory Bank "shared team memory" would be
+  the easiest overclaim in this
   submission and we are not making it.
