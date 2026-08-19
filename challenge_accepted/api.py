@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import time
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -111,16 +112,62 @@ def _mine(challenge_id: str, caller: auth.Caller) -> dict[str, Any]:
         detail="You have not joined this quest yet. Open the invite link and join.")
 
 
-def _party(challenge: dict[str, Any]) -> list[dict[str, str]]:
+#: How long a *named* user profile is reused without re-reading it. See `_profile`.
+PROFILE_TTL = 60.0
+
+#: uid -> (expires_at, profile). Deliberately not locked: every entry is written
+#: whole and read whole, there is no read-modify-write invariant to tear, and the
+#: worst case a race can produce is one redundant Firestore read. A lock here would
+#: buy nothing and this repo has already paid for one non-reentrant lock.
+_profiles: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+def _profile(uid: str) -> dict[str, Any]:
+    """A user profile, cached only once it has a name.
+
+    The dashboard polls every 4s idle and every 1.2s during a run, and each poll read
+    one `users` doc PER PARTY MEMBER purely to turn uids into names and avatars. That
+    is the same shape as the bug `check_poll_cost` was written to catch -- a standing
+    per-poll cost that grows with something the user can add to -- and it is paid for
+    the whole judging window, by every open browser.
+
+    A name and an avatar do not change during a session, so they are cached. What is
+    NOT cached is a miss. `join` adds the uid to the group and writes the profile as
+    two separate writes, so a poll landing between them would otherwise pin an empty
+    profile for a full TTL -- and the teammate who just joined would appear as
+    `u_9a3d0a` for a minute, which is the precise bug `_party` exists to prevent.
+    Caching only success means the roster still fills in on the very next poll.
+
+    The roster ITSELF is never cached: membership is read fresh from the group doc on
+    every poll, so 1 -> 2 in the header still lands within one poll of the join.
+    """
+    if not uid:
+        return {}
+    hit = _profiles.get(uid)
+    if hit and hit[0] > time.time():
+        return hit[1]
+    profile = store.get("users", uid) or {}
+    if profile.get("name"):
+        _profiles[uid] = (time.time() + PROFILE_TTL, profile)
+    return profile
+
+
+def _party(challenge: dict[str, Any],
+           group: dict[str, Any] | None = None) -> list[dict[str, str]]:
     """The roster as people rather than ids.
 
     `u_9a3d0a, trace_55eb8a45` was what a teammate actually saw in the Party pane.
     Profiles are written on join from the verified token, so a name here was proved by
     Google rather than typed into a box.
+
+    `group` is an already-fetched group doc. `/dashboard` reads that doc for the
+    shared facts anyway, and was then reading it a second time through `_members`.
     """
+    members = ([str(m) for m in (group.get("members") or [])]
+               if group is not None else _members(challenge))
     out = []
-    for uid in _members(challenge):
-        profile = store.get("users", uid) or {}
+    for uid in members:
+        profile = _profile(uid)
         out.append({
             "id": uid,
             "name": str(profile.get("name") or uid[:8]),
@@ -138,8 +185,7 @@ def _display_name(uid: str) -> str:
     """
     if not uid:
         return ""
-    profile = store.get("users", uid) or {}
-    return str(profile.get("name") or uid[:8])
+    return str(_profile(uid).get("name") or uid[:8])
 
 
 def _tool_is_shared(challenge_id: str, tool_id: str) -> bool:
@@ -634,7 +680,7 @@ def get_dashboard(challenge_id: str, journal_limit: int = 100,
                 "tools": len(tools),
             },
             "group_facts": group.get("shared_facts", []),
-            "party": _party(challenge),
+            "party": _party(challenge, group),
         },
         "graph": _build_graph(nodes, tools),
         "journal": {"entries": journal[-journal_limit:], "total": len(journal)},

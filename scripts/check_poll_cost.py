@@ -48,8 +48,35 @@ OTHER_CHALLENGES = 24
 WATCH = 12.0
 
 #: Reads per minute, per idle browser. A ceiling, not a target -- the point is to fail
-#: loudly if the read path goes quadratic again, not to police small changes.
+#: loudly if the read path goes quadratic again, not to police small changes. This one
+#: catches a change to the POLL CADENCE; the per-poll budget below catches a change to
+#: what a poll costs.
 BUDGET = 120
+
+#: What ONE poll is allowed to read, by collection. Asserting the composition rather
+#: than a reads-per-poll average is deliberate: an average moves when the 12s window
+#: catches three polls instead of four, or when a poll straddles the start of the
+#: measurement, so any average tight enough to catch a one-read regression is also
+#: loose enough to flap. These say the thing we actually mean.
+#:
+#: The `+ 1` allowances are for a poll already in flight when the measurement starts.
+#: `users` is bounded by the PARTY, not by the poll count -- that is the whole point:
+#: a name is read once and then cached, so it must not scale with how long you watch.
+#:
+#: Before this: the group doc was read twice per poll (`/dashboard` for the shared
+#: facts, then `_party` again through `_members`) and every member's `users` doc was
+#: re-read on every poll. 120 reads/minute against a budget of 120 -- about seven
+#: hours of one idle browser to exhaust the 50k/day free read quota.
+def _per_poll_budget(cycles: int, members: int) -> dict[str, int]:
+    return {
+        "get:challenges": cycles,
+        "get:groups": cycles,
+        "query:nodes": cycles + 1,
+        "query:tools": cycles + 1,
+        "query:journal": cycles + 1,
+        "get:users": members,
+    }
+
 
 reads: Counter = Counter()
 
@@ -124,6 +151,18 @@ def main() -> None:
         page.goto(f"http://127.0.0.1:{PORT}/app?id={cid}", wait_until="networkidle")
         page.wait_for_timeout(1500)
 
+        # Give every member a name, the way a signed-in party has one. Profiles are
+        # written on join from the verified token, so in production a roster is always
+        # named -- and the per-poll cost of turning uids into names depends on whether
+        # there is a name to find. Measuring an unnamed party measures a state the
+        # deployed service never reaches. The local page joins itself an anonymous
+        # member on load (auth off), which is why this runs after the first paint
+        # rather than next to the seed.
+        roster = list((store.get("groups", "grp_team") or {}).get("members", []))
+        for uid in roster:
+            store.put_user(uid, {"name": f"Player {uid[:4]}", "picture": ""})
+        members = len(roster)
+
         reads.clear()          # ignore first paint; measure the STANDING cost
         start = time.time()
         page.wait_for_timeout(int(WATCH * 1000))
@@ -140,7 +179,16 @@ def main() -> None:
     _p(f"store reads        : {total}")
     for k, v in sorted(reads.items(), key=lambda kv: -kv[1]):
         _p(f"  {k:<24} {v}")
+    # One `/dashboard` request reads the challenge doc exactly once, and nothing else
+    # runs on an idle page -- so this counts polls without trusting the browser's
+    # clock or the alignment of the watch window.
+    cycles = reads.get("get:challenges", 0)
+    per_poll = total / cycles if cycles else 0.0
+    budget = _per_poll_budget(cycles, members)
+
     _p(f"\nreads / minute     : {per_min:.0f}  (budget {BUDGET})")
+    _p(f"reads / poll       : {per_poll:.1f}  over {cycles} polls, "
+       f"{members} in the party")
     _p(f"page errors        : {errors if errors else 'none'}")
 
     node_queries = reads.get("query:nodes", 0)
@@ -148,6 +196,21 @@ def main() -> None:
 
     if errors:
         sys.exit(f"FAIL: page errors {errors}")
+    if not cycles:
+        sys.exit("FAIL: the page made no /dashboard requests at all -- this measured "
+                 "nothing. A poll-cost check that never saw a poll is the cheapest "
+                 "kind of green tick and the most useless.")
+
+    over = {k: (reads.get(k, 0), cap) for k, cap in budget.items()
+            if reads.get(k, 0) > cap}
+    if over:
+        detail = ", ".join(f"{k}: {got} > {cap}" for k, (got, cap) in over.items())
+        sys.exit(
+            f"FAIL: {detail}, over {cycles} idle polls with {members} in the party. "
+            f"Full breakdown: {dict(reads)}. Either a document the endpoint already "
+            "fetched is being read again, or per-member data that does not change is "
+            "being re-read on every poll."
+        )
     if per_min > BUDGET:
         sys.exit(
             f"FAIL: {per_min:.0f} Firestore reads/minute for ONE idle browser, budget "
