@@ -1,0 +1,153 @@
+# Submission checklist — All Things Agentic, Collaborative Partner
+
+**Deadline: 31 Aug 2026, 5:00pm PT.** Judging 1 Sept – 1 Oct. Winners 8 Oct.
+
+Two previous videos were rejected for *failing to follow directions and include a demo
+of use*. That is a **content** failure, not a production-quality one — so this file is
+a list of things a judge can tick, taken from the rules verbatim, not a style guide.
+
+Tick it against the finished artefacts, not against intentions.
+
+---
+
+## Stage One — pass/fail viability
+
+Every one of these is a hard gate. Missing any is elimination before anything is scored.
+
+| # | Requirement | Status |
+|---|---|---|
+| 1 | **Hosted project link** — "a URL to the hosted Project … for judging and testing" | ☐ `https://challengeaccepted.app` |
+| 2 | **Text description** — features, functionality, technologies, data sources, learnings | ☐ `docs/DEVPOST.md` needs an accuracy pass |
+| 3 | **Code repository** — public, or share with `testing@devpost.com` and `cloudhackathons@google.com` | ☐ public at `banksythequantLab/challenge-accepted` — confirm it is current |
+| 4 | **Architecture diagram** — "a clear visual representation of your system" | ☑ `docs/architecture.png` |
+| 5 | **Demonstration video** — see below | ☐ |
+| 6 | **Gemini 3.5 or newer** | ☑ `gemini-3.6-flash` + `gemini-3.5-flash-lite`, both live |
+| 7 | **A Google agent framework** (ADK / GenAI SDK / Antigravity / GenKit) | ☑ Google ADK (Python) |
+| 8 | **A Google Cloud infra service** (Cloud Run / Cloud SQL / Firestore / GKE / Pub-Sub) | ☑ Cloud Run + Firestore |
+| 9 | **One category selected** | ☐ Collaborative Partner |
+| 10 | **Free and unrestricted for judges until judging ends** | ⚠ see *The sign-in wall* below |
+
+---
+
+## The video — where the last two died
+
+Rules text, quoted:
+
+- **"It should not be longer than 4 minutes. If it is longer than 4 minutes, only the
+  first 4 minutes may be evaluated."**
+- **"Submission must be uploaded to and made publicly visible on YouTube or Vimeo."**
+- Must include **"a short overview of the problem your Project is solving, the value
+  proposition as well as a demo of the application in action"**
+- Must **"demonstrate the backend is running on Google Cloud"**
+- Must **"be in English or include English subtitles"**
+- No third-party advertising or sponsorship indicators; nothing derogatory; no IP you
+  do not own.
+
+### Tick these against the finished cut
+
+| ✓ | Item | Why it is here |
+|---|---|---|
+| ☐ | Under 4:00, checked on the uploaded file, not the timeline | The cap is on what they watch |
+| ☐ | Public on YouTube or Vimeo — open it in a private window | "Unlisted" is not "publicly visible"; a private link scores zero |
+| ☐ | States **the problem** out loud in the first 30s | Explicitly required, and easy to skip when you are proud of the build |
+| ☐ | States **the value proposition** | Separate requirement from the problem. Both, not one |
+| ☐ | Shows **the application in action** — a person using it, not slides | This is the one the rejections named |
+| ☐ | **Google Cloud is visibly on screen** — Cloud Run console, or the `.run.app` / deployed URL in the address bar | Explicitly required. Free marks. Most commonly missed |
+| ☐ | English, or English subtitles burned in or uploaded | |
+| ☐ | No music you do not have rights to, no brand logos other than your own | |
+
+### Scored separately (not pass/fail)
+
+> *"Does the video show an unedited, live execution of the agent performing its task?"*
+> — one sub-point inside **Demo & Production Readiness (30%)**.
+
+Cutting a wait is **not** against the rules and does not disqualify anything. It costs
+some fraction of one sub-criterion. A visible, labelled jump — `⏱ 3:48 elapsed` on
+screen — reads as confident rather than evasive.
+
+**Measured runtimes, warm, revision 00063** (so the cut can be planned rather than
+discovered):
+
+| beat | time |
+|---|---|
+| 3 interview turns | 40s |
+| Cartographer | 27s |
+| Quartermaster | 17s |
+| FORGE, 8 workers, 6 specs, one batch | 3m 48s |
+| **cold start to finished toolkit** | **~5m 16s** |
+
+A full unbroken run does not fit in four minutes. FORGE is most of it, and the two
+levers available have been spent — see `config.FORGE_WORKERS` and
+`config.MODEL_TOOLWRIGHT`.
+
+### Before recording — non-negotiable
+
+- [ ] **Deploy with `-KeepWarm`** (`min-instances=1`). On a cold instance one run spent
+      **nine minutes** between Cartographer and the first FORGE dispatch, against 46s
+      warm. You cannot edit around that; you would just re-record and not know why.
+- [ ] Rehearse the full run end to end at least twice on the revision you will record.
+- [ ] Check the party roster on the demo challenge — live checks leave `ca_test_*`
+      identities behind, and `6 on this quest — you and Forge Dc53A6, Dana B71C22…`
+      makes a two-person party look like a load test. `python scripts\reap_test_users.py`.
+
+---
+
+## Judging criteria — what the score is actually made of
+
+| Weight | Criterion | What it asks |
+|---|---|---|
+| 40% | Innovation & Operational Utility | "Does the system eliminate real-world friction? Is the 'Twist' present?" Autonomous execution over chat |
+| 30% | Architectural Discipline & Tech Stack | Engineering decisions, decoupling, state management, failure tolerance, modularisation, security isolation |
+| 30% | Demo & Production Readiness | Documentation clarity, the unedited-live-execution question, repo quality and setup reproducibility |
+
+Stage Three bonus, **max +0.6 on a 1–6 scale**, currently all unclaimed:
+
+- [ ] Published content — blog or video: **+0.2**
+- [ ] Social post with **#AllThingsAgentic**: **+0.2**
+- [ ] Additional Google AI models (Gemma, Veo, Lyria): **+0.2 each**, max 0.6.
+      `gemini-embedding-001` is already in production for group-memory ranking — worth
+      checking whether it counts before assuming it does.
+
+---
+
+## The sign-in wall
+
+> *"The Entrant must make the Project available free of charge and without any
+> restriction, for testing, evaluation and use by the Sponsor, Administrator and
+> Judges until the Judging Period ends."*
+
+`challengeaccepted.app` requires Google sign-in. A judge **can** sign in, so this is
+probably compliant — but a judge who bounces at the wall scores the submission on
+nothing at all, and "without any restriction" is the phrase to be nervous about.
+
+Decide one of:
+
+- [ ] Leave it, and say plainly in the description that sign-in is Google one-click and
+      why the wall exists (a challenge is private to its party — the membership model
+      *is* a feature, and `scripts\check_auth_live.py` proves it holds).
+- [ ] Add a read-only demo challenge reachable without an account.
+- [ ] Provide judge credentials in the submission notes.
+
+---
+
+## Disqualification triggers, quoted
+
+- False information about identity, address, contact, ownership of rights, or compliance
+- **Pre-existing projects, or work developed outside the submission period**
+  (3 Aug – 31 Aug 2026)
+- Plagiarism or IP infringement
+- Failing the content restrictions or the theme
+- Ineligibility (sanctioned countries, employees of contest entities)
+
+---
+
+## Final pass, on submission day
+
+- [ ] Hosted link opens clean in a private window on a machine that has never seen it
+- [ ] Repo `main` is pushed and matches the deployed revision
+- [ ] `README.md` claims match what the checks actually prove — every "Verified live"
+      row re-run against the revision being submitted
+- [ ] Architecture diagram attached as an **image**, not a link to an HTML file
+- [ ] Video URL opens in a private window and plays
+- [ ] Category set to **Collaborative Partner**
+- [ ] Submitted with a **day** of slack, not an hour
