@@ -23,7 +23,7 @@
 </head>
 <body>
 <div class="wrap">
-<svg viewBox="0 0 1440 1215" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Challenge Accepted system architecture diagram">
+<svg viewBox="0 0 1440 1270" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Challenge Accepted system architecture diagram">
   <defs>
     <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#5F6368"/>
@@ -72,10 +72,10 @@
   <text class="mono" x="1180" y="378">gemini-3.6-flash</text>
 
   <rect x="70" y="416" width="295" height="186" rx="9" fill="#fff" stroke="#DADCE0" stroke-width="1.2"/>
-  <rect x="70" y="416" width="295" height="30" rx="9" fill="#4285F4"/>
-  <rect x="70" y="437" width="295" height="9" fill="#4285F4"/>
+  <rect x="70" y="416" width="295" height="30" rx="9" fill="#1A73E8"/>
+  <rect x="70" y="437" width="295" height="9" fill="#1A73E8"/>
   <text class="pill" x="86" y="436">PHASE 1 · ACCEPT</text>
-  <text class="sub2" x="252" y="436" fill="#fff">clarify the goal</text>
+  <text class="sub2" x="252" y="436" style="fill:#fff">clarify the goal</text>
   <rect x="84" y="458" width="267" height="60" rx="7" fill="#F8F9FA" stroke="#4285F4" stroke-width="1"/>
   <text class="card" x="98" y="479">2 · Interviewer</text>
   <text class="sub" x="98" y="497">5&#8211;9 questions that change the graph.</text>
@@ -86,10 +86,10 @@
   <text class="mono" x="98" y="582">single_turn  ·  google_search</text>
 
   <rect x="405" y="416" width="295" height="186" rx="9" fill="#fff" stroke="#DADCE0" stroke-width="1.2"/>
-  <rect x="405" y="416" width="295" height="30" rx="9" fill="#34A853"/>
-  <rect x="405" y="437" width="295" height="9" fill="#34A853"/>
+  <rect x="405" y="416" width="295" height="30" rx="9" fill="#188038"/>
+  <rect x="405" y="437" width="295" height="9" fill="#188038"/>
   <text class="pill" x="421" y="436">PHASE 2 · MAP</text>
-  <text class="sub2" x="566" y="436" fill="#fff">draw the goal graph</text>
+  <text class="sub2" x="566" y="436" style="fill:#fff">draw the goal graph</text>
   <rect x="419" y="458" width="267" height="60" rx="7" fill="#F8F9FA" stroke="#34A853" stroke-width="1"/>
   <text class="card" x="433" y="479">3 · Cartographer</text>
   <text class="sub" x="433" y="497">8&#8211;20 nodes &#8804;2h each + edges +</text>
@@ -100,10 +100,10 @@
   <text class="sub" x="433" y="581">budget. Flash-only needs this.</text>
 
   <rect x="740" y="416" width="295" height="186" rx="9" fill="#fff" stroke="#DADCE0" stroke-width="1.2"/>
-  <rect x="740" y="416" width="295" height="30" rx="9" fill="#F9AB00"/>
-  <rect x="740" y="437" width="295" height="9" fill="#F9AB00"/>
+  <rect x="740" y="416" width="295" height="30" rx="9" fill="#B06000"/>
+  <rect x="740" y="437" width="295" height="9" fill="#B06000"/>
   <text class="pill" x="756" y="436">PHASE 3 · FORGE</text>
-  <text class="sub2" x="890" y="436" fill="#fff">build the missing tools</text>
+  <text class="sub2" x="890" y="436" style="fill:#fff">build the missing tools</text>
   <rect x="754" y="458" width="267" height="60" rx="7" fill="#F8F9FA" stroke="#F9AB00" stroke-width="1"/>
   <text class="card" x="768" y="479">4 · Quartermaster</text>
   <text class="sub" x="768" y="497">Per node: what capability is missing?</text>
@@ -114,10 +114,10 @@
   <text class="mono" x="768" y="582">ParallelAgent  ·  Firestore = truth</text>
 
   <rect x="1075" y="416" width="295" height="186" rx="9" fill="#fff" stroke="#DADCE0" stroke-width="1.2"/>
-  <rect x="1075" y="416" width="295" height="30" rx="9" fill="#EA4335"/>
-  <rect x="1075" y="437" width="295" height="9" fill="#EA4335"/>
+  <rect x="1075" y="416" width="295" height="30" rx="9" fill="#C5221F"/>
+  <rect x="1075" y="437" width="295" height="9" fill="#C5221F"/>
   <text class="pill" x="1091" y="436">PHASE 4 · CLIMB</text>
-  <text class="sub2" x="1235" y="436" fill="#fff">guide, verify, learn</text>
+  <text class="sub2" x="1235" y="436" style="fill:#fff">guide, verify, learn</text>
   <rect x="1089" y="458" width="267" height="60" rx="7" fill="#F8F9FA" stroke="#EA4335" stroke-width="1"/>
   <text class="card" x="1103" y="479">6 · Coach</text>
   <text class="sub" x="1103" y="497">One node at a time. Hands over the tool.</text>
@@ -208,29 +208,33 @@
 
   <line x1="720" y1="980" x2="720" y2="1016" stroke="#F9AB00" stroke-width="1.8" marker-end="url(#arb)"/>
 
-  <rect x="40" y="1020" width="1360" height="160" rx="12" fill="#FEF7E0" stroke="#F9AB00" stroke-width="1.5"/>
+  <rect x="40" y="1020" width="1360" height="215" rx="12" fill="#FEF7E0" stroke="#F9AB00" stroke-width="1.5"/>
   <text class="band" x="66" y="1050">SHARED DATA SOURCE  —  Firestore  ·  structured truth + real-time multiplayer</text>
 
-  <rect x="70" y="1064" width="415" height="100" rx="9" fill="#fff" stroke="#F9AB00" stroke-width="1.2"/>
+  <rect x="70" y="1064" width="415" height="150" rx="9" fill="#fff" stroke="#F9AB00" stroke-width="1.2"/>
   <text class="monod" x="86" y="1086">/challenges/{id}</text>
   <text class="mono" x="86" y="1104">  charter, outcome, deadline, groupId, status</text>
   <text class="monod" x="86" y="1124">  /nodes/{id}</text>
   <text class="mono" x="86" y="1142">    acceptanceCriteria, dependsOn[], evidence[]</text>
-  <text class="monod" x="86" y="1160">    /tools/{id}  spec, code, smokeTest, rating</text>
+  <text class="monod" x="86" y="1160">    /tools/{id}  spec, code, smokeTest, rating, shared</text>
+  <text class="monod" x="86" y="1178">/tool_state/{toolId}:{uid|party}</text>
+  <text class="mono" x="86" y="1196">  data, version, updatedBy &#8212; one copy each, or one for all</text>
 
-  <rect x="505" y="1064" width="415" height="100" rx="9" fill="#fff" stroke="#F9AB00" stroke-width="1.2"/>
+  <rect x="505" y="1064" width="415" height="150" rx="9" fill="#fff" stroke="#F9AB00" stroke-width="1.2"/>
   <text class="monod" x="521" y="1086">  /journal/{id}</text>
   <text class="mono" x="521" y="1104">    actor, kind, text, nodeId, createdAt</text>
   <text class="monod" x="521" y="1124">  /feedback/{id}</text>
   <text class="mono" x="521" y="1142">    targetType, targetId, verdict, reason</text>
   <text class="mono" x="521" y="1160">    &#8594; feeds the next generation&#8217;s ranking</text>
 
-  <rect x="940" y="1064" width="430" height="100" rx="9" fill="#fff" stroke="#F9AB00" stroke-width="1.2"/>
+  <rect x="940" y="1064" width="430" height="150" rx="9" fill="#fff" stroke="#F9AB00" stroke-width="1.2"/>
   <text class="monod" x="956" y="1086">/groups/{id}</text>
-  <text class="mono" x="956" y="1104">  members[], sharedFacts[], normsLearned[]</text>
+  <text class="mono" x="956" y="1104">  members[], sharedFacts[], factVectors[], inviteToken</text>
   <text class="sub" x="956" y="1124" font-weight="600" fill="#3C4043">Goal-scoped, not corpus-scoped.</text>
   <text class="sub" x="956" y="1141">A fact one teammate discovers attaches to the node,</text>
   <text class="sub" x="956" y="1157">propagates to the group, and opens the next session.</text>
+  <text class="sub" x="956" y="1181">Ranked by meaning &#8212; 256-d embeddings, cosine to the goal.</text>
+  <text class="sub" x="956" y="1197">Capped at 40, and it reports the count it withheld.</text>
 
   <path d="M1400 197 L1424 197 L1424 1114 L1404 1114" fill="none" stroke="#F9AB00" stroke-width="1.8" stroke-dasharray="6 4" marker-end="url(#arb)"/>
   <g transform="rotate(90 1418 640)">
