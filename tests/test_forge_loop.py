@@ -17,6 +17,7 @@ from google.adk.events import Event
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 
+from challenge_accepted import config
 from challenge_accepted.sub_agents.forge import (
     QUEUE_KEY,
     SEED_KEY,
@@ -33,7 +34,11 @@ SEEN: list[list[str]] = []
 class RecordingWorkers(BaseAgent):
     """Stands in for ParallelAgent[toolwright_0..3]; records each batch it receives."""
 
-    workers: int = 4
+    #: Mirror the real fan-out width. Hardcoded at 4, this stand-in silently dropped
+    #: every spec the Dispatcher put in slots 4-7 the day the batch went to eight, and
+    #: reported it as "only 6 of 10 specs were dispatched" -- a Dispatcher bug that did
+    #: not exist. A fake that does not track the thing it is faking tests itself.
+    workers: int = config.FORGE_WORKERS
 
     async def _run_async_impl(
         self, ctx: InvocationContext

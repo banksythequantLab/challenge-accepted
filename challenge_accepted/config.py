@@ -27,9 +27,20 @@ MODEL_REASONING: str = os.getenv("CA_MODEL_REASONING", "gemini-3.6-flash")
 #: self-checking smoke test -- which is the profile that survives a cheaper model
 #: better than open-ended reasoning does.
 #:
-#: Set to the reasoning model by default so nothing changes without a decision, and
-#: overridden per deployment while the trade-off is being measured rather than
-#: guessed at. Quality regression here is visible and cheap to detect:
+#: MEASURED, AND THE ANSWER WAS NO. gemini-3.5-flash was tried here to buy back demo
+#: seconds and it is SLOWER, not faster -- same six specs, one batch, eight workers:
+#:
+#:     gemini-3.6-flash   6 specs -> 6 tools   3m48s
+#:     gemini-3.5-flash   6 specs -> 7 tools   4m17s
+#:
+#: Per model call it is cheaper. It just needs more of them: one worker made 24
+#: code-execution round trips arguing with its own smoke test. The smoke test is the
+#: point -- it is what stops a broken tool shipping -- so a model that fails it more
+#: often pays for the discount in wall clock, on the one phase the user watches.
+#:
+#: The knob stays because it is how that was learned, and how the next model will be
+#: judged. Default is the reasoning tier, and moving it needs a measurement, not a
+#: price list. Quality regression is separately cheap to detect:
 #: `scripts\check_tool_render.py --browser` opens every tool and reads back the worked
 #: example it is required to render, so a model that ships plausible-looking broken
 #: HTML fails that check rather than reaching a judge.
@@ -93,7 +104,18 @@ MAX_NODES: int = int(os.getenv("CA_MAX_NODES", "20"))
 #: The lesson worth more than the number: a change that makes a symptom go away three
 #: times running is still not a diagnosis. Two workers passed every test we had and was
 #: wrong about why.
-FORGE_WORKERS: int = int(os.getenv("CA_FORGE_WORKERS", "4"))
+#:
+#: Eight now, because batch COUNT is the cost and batch WIDTH is nearly free. A graph
+#: of six specs fits in one batch at eight wide, and one batch costs whatever the
+#: slowest single Toolwright costs. Idle workers end in about nine seconds, so
+#: over-provisioning buys insurance against a bigger graph for almost nothing.
+#: Measured on the deployed service, one batch every time: 4 specs / 4 tools in 2m57s,
+#: 6 / 6 in 3m48s, 6 / 7 in 4m17s.
+#:
+#: That second number is why this matters: the demo video is capped at four minutes
+#: and judged partly on showing "an unedited, live execution". FORGE is most of the
+#: wall clock, so its shape is a submission constraint, not just a nicety.
+FORGE_WORKERS: int = int(os.getenv("CA_FORGE_WORKERS", "8"))
 
 
 def use_vertex_models() -> bool:
