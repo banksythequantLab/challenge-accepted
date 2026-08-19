@@ -101,28 +101,52 @@ levers available have been spent — see `config.FORGE_WORKERS` and
 | 30% | Architectural Discipline & Tech Stack | Engineering decisions, decoupling, state management, failure tolerance, modularisation, security isolation |
 | 30% | Demo & Production Readiness | Documentation clarity, the unedited-live-execution question, repo quality and setup reproducibility |
 
-Stage Three bonus, **max +0.6 on a 1–6 scale**, currently all unclaimed. Quoted from
+Stage Three bonus, **max +0.6 on a 1–6 scale**. **All three earned: +0.6.** Quoted from
 the rules page rather than paraphrased, because the first version of this section
 paraphrased it and got the hashtag wrong — see the warning below.
 
-- [ ] **Published content: +0.2.** *"Publish a piece of content (blog, podcast,
-      video): Covering how the project was built on any public platform."* Two
-      conditions that are easy to miss and are worth the whole 0.2 on their own:
-      *"The content must be public (not unlisted)"* and *"You must include language
-      that says you created the piece of content for the purposes of entering this
-      hackathon."* Link goes in the submission form.
-      Draft ready: `docs/BUILD_WRITEUP.md`.
+Every one of them is *published* and none of them is *claimed* until the three URLs are
+in the submission form. That is the whole remaining task for this section.
 
-- [ ] **Social post: +0.2.** *"Publish a social media post: Highlight or promote your
-      project on social media post on X, LinkedIn, Instagram, or Facebook."* The tag is
-      **`#AllThingsAgenticHackathon`** — *"For any social media posts on platforms such
-      as X or LinkedIn, include the hashtag #AllThingsAgenticHackathon."*
-      Link goes in the submission form. Drafts ready: `docs/SOCIAL_POST.md`.
+- [x] **Published content: +0.2 — PUBLISHED.**
+      <https://gist.github.com/banksythequantLab/d1b85fd03719542f72341bd69d9077aa>
+
+      *"Publish a piece of content (blog, podcast, video): Covering how the project was
+      built on any public platform."* Two conditions that are easy to miss and are
+      worth the whole 0.2 on their own: *"The content must be public (not unlisted)"*
+      and *"You must include language that says you created the piece of content for
+      the purposes of entering this hackathon."* Both are satisfied — public confirmed
+      by fetching the gist API **without** an auth header (`"public": true`), and the
+      required sentence is the opening paragraph, not a footnote.
+      Source: `docs/BUILD_WRITEUP.md`.
+
+      ☐ **Still to do: paste that URL into the submission form.** Publishing it is not
+      claiming it.
+
+- [x] **Social post: +0.2 — POSTED.**
+      <https://x.com/banksythequant/status/2090201173580001327>
+
+      *"Publish a social media post: Highlight or promote your project on social media
+      post on X, LinkedIn, Instagram, or Facebook."* Posted from `@banksythequant`, the
+      same account that announced the DeveloperWeek NY 2026 prize, so the hackathon
+      history is on one timeline.
+
+      The tag **rendered as a real hashtag link** —
+      `href="/hashtag/AllThingsAgenticHackathon?src=hashtag_click"` — which is the
+      thing actually worth checking. Plain grey text means X did not register it, and a
+      tag that did not register is a bonus that did not land.
 
       > ⚠️ This file previously said the tag was `#AllThingsAgentic`. It is not.
       > A post with the short tag is a post that scores zero for this bonus while
       > looking, to whoever wrote it, exactly like a post that scored 0.2. Copy the
-      > tag from the draft; do not retype it.
+      > tag from `docs/SOCIAL_POST.md`; do not retype it.
+
+      Note: the published text is a 280-character cut of the drafts, because the
+      account is not on Premium. The long-form versions in `docs/SOCIAL_POST.md` are
+      still the right copy for LinkedIn if a second post is ever wanted — one link is
+      enough for the 0.2, a second only buys a spare.
+
+      ☐ **Still to do: paste that URL into the submission form.**
 
 - [x] **Additional Google AI models: +0.2 each, max +0.6.** *"Earn 0.2 bonus points
       for each additional Google AI model successfully integrated (such as Gemma, Veo,
