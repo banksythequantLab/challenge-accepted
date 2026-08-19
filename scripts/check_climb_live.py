@@ -66,8 +66,13 @@ def main() -> int:
     if vague:
         args.remove("--vague")
     base = (take("--url") or DEFAULT_URL).rstrip("/")
+    #: Evidence that fits whichever node is ready. The built-in default is about
+    #: running paces, so on any other kind of node the Referee will refuse it -- see
+    #: the "inconclusive" branch below, which says so rather than blaming the product.
+    supplied_evidence = take("--evidence")
     if not args:
-        _p("usage: check_climb_live.py <challenge_id> --as <uid> [--node <node_id>]")
+        _p("usage: check_climb_live.py <challenge_id> --as <uid> [--node <node_id>] "
+           "[--evidence \"...\"] [--vague]")
         return 2
     cid = args[0]
 
@@ -132,7 +137,7 @@ def main() -> int:
         # So: concrete, specific, and checkable, with real numbers, names and a
         # timestamped artefact. It reads like something a person actually did, which
         # is the only kind of evidence this check has any business submitting.
-        message = (
+        message = supplied_evidence or (
             f"I've finished the step '{target['label']}'. Evidence: I did it on "
             f"Tuesday evening. Current 3k average pace is 6:42 per km (20:06 for 3k, "
             f"measured on the Hollowmere loop with a Garmin). For a sub-55 10k the "
@@ -176,6 +181,34 @@ def main() -> int:
                 if p.get("text", "").strip():
                     _p(f"  {ev.get('author')}: {p['text'].strip()[:160]}")
 
+    def _say(base, cid, session, uid, auth, text) -> str:
+        """One more turn on the SAME session, returning the model's prose.
+
+        Deliberately reusing the session rather than opening a fresh one: the claim
+        being tested is that the agent reads the challenge's real state, and a new
+        session would make that trivially true by forcing a reload. If it can be
+        fooled, it should be fooled by its own recent memory.
+        """
+        out = []
+        with requests.post(f"{base}/run_sse", headers=auth, stream=True, timeout=900,
+                           json={"appName": APP_NAME, "userId": uid,
+                                 "sessionId": session, "streaming": False,
+                                 "newMessage": {"role": "user",
+                                                "parts": [{"text": text}]}}) as r:
+            if r.status_code != 200:
+                return f"run_sse {r.status_code}"
+            for line in r.iter_lines(decode_unicode=True):
+                if not line or not line.startswith("data:"):
+                    continue
+                try:
+                    ev = json.loads(line[5:].strip())
+                except Exception:
+                    continue
+                for p in (ev.get("content") or {}).get("parts") or []:
+                    if p.get("text", "").strip():
+                        out.append(p["text"].strip())
+        return "\n".join(out)
+
     after = nodes_of(base, cid, auth)
     now = next(n for n in after if n["id"] == target["id"])
     _p(f"\nnode after : {now['status']}   evidence: {now['evidence']}")
@@ -196,8 +229,28 @@ def main() -> int:
         return 1
 
     if now["status"] != "done":
-        bad.append(f"the node is still '{now['status']}' -- nothing closed it. "
-                   f"complete_node called: {saw.get('complete_node')}")
+        # Two different outcomes wear the same shape, and conflating them is how this
+        # check reported the product as broken twice in one day.
+        #
+        # The canned evidence below is concrete, but concrete about ONE node -- paces
+        # and a GPX file. The check picks whichever node is ready, so on a node whose
+        # criterion asks for "the 4 chosen training days and the workout type for
+        # each", that evidence genuinely does not satisfy it, and a Referee worth
+        # having says so. That is the feature working.
+        #
+        # A Referee that was consulted and said no is not a failure of CLIMB. A
+        # Referee that was never consulted, or one that closed a node on nothing, is.
+        # Exit 2 for "inconclusive, feed it evidence that fits", 1 for "broken".
+        if saw.get("referee"):
+            _p("\n--- inconclusive, and not a product failure ---")
+            _p(f" * The Referee judged the evidence and refused it. The default "
+               f"evidence is about running paces; this node asks for: "
+               f"{target['criteria']!r}")
+            _p(" * Pass --evidence \"...\" with something that actually satisfies "
+               "that criterion to test the closing path on this node.")
+            return 2
+        bad.append(f"the node is still '{now['status']}' and the Referee was never "
+                   f"consulted -- complete_node called: {saw.get('complete_node')}")
     if now["status"] == "done" and not now["evidence"]:
         bad.append("the node closed with NO evidence recorded -- the Referee is a "
                    "rubber stamp")
@@ -206,7 +259,50 @@ def main() -> int:
         for x in bad:
             _p(" * " + x)
         return 1
-    _p("\nPASS -- a step can actually be finished.")
+
+    # --- and now the beat that has only ever been proved on localhost -------------
+    #
+    # "A joining teammate is handed live work, not finished work" is verified by
+    # `check_handoff.py`, which spins up its own uvicorn against a seeded challenge.
+    # That is a real test of the logic and it is honestly labelled -- but this repo
+    # has already been burned once by exactly that gap: every Toolwright was dying on
+    # the deployed service for weeks while the local run built six tools every time.
+    #
+    # We are standing in the best possible place to close it. A node was just closed
+    # on production, with real evidence, in a session that is still open. Ask what to
+    # do next and see whether the Coach leads with the thing that is finished.
+    #
+    # Mentioning a done node is fine and often right -- "the baseline is established,
+    # so..." is context. Leading with one is the failure: it says plainly that the
+    # agent did not read the state it claims to read.
+    _p("\n--- and does it now offer the step it just closed? ---")
+    titles = {n["id"]: (n.get("label") or n["id"]) for n in after}
+    done_ids = {n["id"] for n in after if n["status"] == "done"}
+    reply = _say(base, cid, session, uid, auth,
+                 "Thanks. I've just come back to this -- what should I pick up next?")
+    _p(f"coach: {reply[:200]}")
+
+    # First node named wins. Match on the longest titles first so a title that
+    # contains another one cannot be credited to the shorter one.
+    named = sorted(((reply.lower().find((titles[i] or "").lower()), i)
+                    for i in titles if titles[i]
+                    and (titles[i] or "").lower() in reply.lower()),
+                   key=lambda t: t[0])
+    if not named:
+        _p("  (no node named by title -- nothing to judge, not counted either way)")
+    else:
+        first = named[0][1]
+        _p(f"  leads with : {titles[first]!r} ({'done' if first in done_ids else 'open'})")
+        if first in done_ids:
+            _p("\n--- problems ---")
+            _p(f" * the Coach led with {titles[first]!r}, which was just closed in "
+               f"this very session. A teammate would open the app and be sent to do "
+               f"work that is already finished.")
+            return 1
+        _p("  offers open work first, on the deployed service")
+
+    _p("\nPASS -- a step can actually be finished, and the next thing offered is "
+       "not the thing that just finished.")
     return 0
 
 
