@@ -72,6 +72,18 @@ _NESTED = "@call_"
 #: dropped on its exit, so a turn that never finishes leaves at most one entry behind.
 _TURNS: dict[str, dict[str, list[str]]] = {}
 
+#: The agent `install()` was called on -- the one ADK starts for a user's turn.
+#:
+#: Recorded rather than hardcoded, and it exists because the first version cried wolf.
+#: An `AgentTool` runs its agent as the root of a NEW invocation, so the Referee (an
+#: AgentTool on the Coach, deliberately, to stop an infinite delegation loop -- see
+#: sub_agents/referee.py) finished every CLIMB turn alone and got reported as the open
+#: bug, every single time, on a path that was working perfectly.
+#:
+#: A warning that fires on a healthy documented path is worse than no warning: it
+#: teaches you to skim past the line that caught two real bugs.
+ROOT_NAME: str = ""
+
 
 def _trace(message: str) -> None:
     if FLOW_DEBUG:
@@ -162,7 +174,8 @@ def _left(callback_context: Any):
         _trace(f"turn done: agents[{ran}] transfers={turn['transfers'] or 'NONE'} "
                f"nodes={nodes} tools={turn['tools']} "
                f"deep={turn['deep'] or 'none'}")
-        if not turn["transfers"] and len(set(turn["agents"])) == 1:
+        if (not turn["transfers"] and len(set(turn["agents"])) == 1
+                and name == ROOT_NAME):
             # The exact shape of the open bug: the root answered by itself. Said out
             # loud so it can be grepped for, rather than inferred later from what is
             # missing three lines up.
@@ -218,9 +231,14 @@ def install(agent: Any, _seen: set[int] | None = None) -> int:
     no-op would leave the next unreproducible failure exactly as unreadable as this
     one was.
     """
+    global ROOT_NAME
     seen = _seen if _seen is not None else set()
     if agent is None or id(agent) in seen:
         return 0
+    if _seen is None and agent is not None:
+        # The outermost call names the root. An AgentTool's agent is reached through
+        # recursion and must NOT claim the title, or the false positive comes back.
+        ROOT_NAME = str(getattr(agent, "name", "") or "")
     seen.add(id(agent))
 
     touched = 0

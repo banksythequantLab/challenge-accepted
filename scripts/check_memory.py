@@ -28,9 +28,13 @@ import time
 import urllib.error
 import urllib.request
 import uuid
+from pathlib import Path
 
 APP = "challenge_accepted"
-DEFAULT_URL = "https://challenge-accepted-xk3m7ygefa-uc.a.run.app"
+#: The custom domain, like every other live check. This still pointed at the raw Cloud
+#: Run hostname, which works but means a run of this check could pass while the URL
+#: the judges are given was broken.
+DEFAULT_URL = "https://challengeaccepted.app"
 
 #: Two needles, because one could be luck. Both are specific enough that a model
 #: inventing plausible filler would not land on them.
@@ -49,11 +53,23 @@ CHALLENGE_ONE = [
 PROBE = "Before we start something new -- what do you already know about me?"
 
 
+#: Set by `main` once, from `testauth.mint`. Empty when the target has auth off.
+#:
+#: This check was blind to production for weeks and nobody noticed. Sign-in shipped,
+#: every request here started coming back `HTTP Error 401: Unauthorized`, and because
+#: the failure was a raw traceback rather than a FAIL line it read like a broken script
+#: rather than an unmeasured claim. The README's "Verified live" row for cross-session
+#: memory was, in that window, carried by nothing at all. Exactly the same thing
+#: happened to `check_forge_live.py`, and it is documented there too, which means this
+#: is a mistake this repo has now made twice.
+_AUTH: dict[str, str] = {}
+
+
 def _post(base: str, path: str, body: dict, timeout: int = 300) -> str:
     req = urllib.request.Request(
         base.rstrip("/") + path,
         data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **_AUTH},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -94,12 +110,24 @@ def _found(haystack: str) -> list[str]:
 
 
 def main(base: str) -> int:
-    user = f"mem_{uuid.uuid4().hex[:8]}"
-    print(f"target : {base}")
-    print(f"user   : {user}\n")
-
     health = json.loads(urllib.request.urlopen(
         base.rstrip("/") + "/api/healthz", timeout=60).read())
+
+    # Sign in BEFORE anything else, and say so. The uid has to be the one the token
+    # was minted for: `authgate` rejects a `/apps/{app}/users/{uid}` path whose uid is
+    # not the caller, which is the whole point of that guard.
+    user = f"mem_{uuid.uuid4().hex[:8]}"
+    if health.get("auth") == "required":
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from testauth import PREFIX, mint
+
+        user = PREFIX + "mem_" + uuid.uuid4().hex[:8]
+        _AUTH["Authorization"] = "Bearer " + mint(user)
+
+    print(f"target : {base}")
+    print(f"user   : {user}")
+    print(f"auth   : {'signed in' if _AUTH else 'off on this deployment'}\n")
+
     print(f"health : store={health.get('store')} memory={health.get('memory')} "
           f"sessions={health.get('sessions')}")
     if health.get("memory") != "agentengine":

@@ -36,7 +36,10 @@ class _Tool:
 @pytest.fixture(autouse=True)
 def _clean():
     flow_debug._TURNS.clear()
+    before = flow_debug.ROOT_NAME
+    flow_debug.ROOT_NAME = "warden"
     yield
+    flow_debug.ROOT_NAME = before
     flow_debug._TURNS.clear()
 
 
@@ -175,6 +178,35 @@ def test_the_summary_reports_depth(caplog):
     with caplog.at_level(logging.WARNING):
         flow_debug._left(_Ctx("warden", "inv_sum"))
     assert "deep=['warden']" in caplog.text
+
+
+def test_an_agent_tool_finishing_alone_is_not_reported_as_the_bug(caplog):
+    """The false positive that made this warning worthless for a while.
+
+    An `AgentTool` runs its agent as the ROOT of a new invocation, so the Referee --
+    an AgentTool on the Coach, deliberately, to stop an infinite delegation loop --
+    finished every CLIMB turn alone and got flagged as the open bug, on a path that
+    was working perfectly. A warning that cries wolf on a documented healthy path
+    teaches you to skim past the line that caught two real bugs.
+    """
+    ref = _Ctx("referee", "inv_ref")
+    with caplog.at_level(logging.WARNING):
+        flow_debug._entered(ref)
+        flow_debug._tool_called(_Tool("complete_node"), {}, ref)
+        flow_debug._left(ref)
+
+    assert "NO HANDOFF" not in caplog.text
+    assert "turn done" in caplog.text, "the summary is still worth having"
+
+
+def test_install_records_the_root_and_agent_tools_do_not_claim_it():
+    """`ROOT_NAME` has to come from the outermost install call. If a nested AgentTool
+    overwrote it, every real NO HANDOFF would go silent instead."""
+    from challenge_accepted.agent import root_agent
+
+    flow_debug.ROOT_NAME = ""
+    flow_debug.install(root_agent, None)
+    assert flow_debug.ROOT_NAME == root_agent.name
 
 
 def test_chaining_keeps_the_callback_that_was_already_there():
