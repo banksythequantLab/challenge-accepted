@@ -120,13 +120,41 @@ Stage Three bonus, **max +0.6 on a 1–6 scale**, currently all unclaimed:
 probably compliant — but a judge who bounces at the wall scores the submission on
 nothing at all, and "without any restriction" is the phrase to be nervous about.
 
-Decide one of:
+**Decided: keep the wall.** It is not incidental, it is load-bearing:
 
-- [ ] Leave it, and say plainly in the description that sign-in is Google one-click and
-      why the wall exists (a challenge is private to its party — the membership model
-      *is* a feature, and `scripts\check_auth_live.py` proves it holds).
-- [ ] Add a read-only demo challenge reachable without an account.
-- [ ] Provide judge credentials in the submission notes.
+1. **Identity is what makes the collaboration claim possible.** No accounts means no
+   roster, no attribution (*"Derek found that Cloud Run needs billing"* — by name), no
+   personal-vs-shared tool state, no leaving a party, no revocable invites. The demo's
+   central beat is a teammate inheriting a discovery credited to a specific person.
+   Anonymously that is a text blob.
+2. **Turning auth off serves an admin console.** `main.py`: `web=not auth.required()`.
+   With auth off, ADK's dev UI is exposed — and it runs agents as any user id typed
+   into it.
+3. **It is scoring evidence.** "Security isolation" is named in the 30% Architectural
+   Discipline criterion, and `scripts\check_auth_live.py` is the only check written
+   entirely from the outside — every assertion is something that must FAIL. A signed-in
+   stranger holding a leaked challenge id gets 403 on the dashboard, tools and journal.
+4. **Cost and abuse.** ~$0.86 of model calls per challenge and no rate limiting. An open
+   `/run_sse` is somebody else's bill.
+
+A read-only demo challenge was rejected: real engineering, it weakens the isolation
+story being scored, and it solves a problem two sentences solve.
+
+### What was done instead
+
+- [x] **The gate now sells.** It used to explain the wall without saying what was behind
+      it — answering "why are you asking" for somebody not yet given a reason to care.
+      It now leads with the Warden's own opening line, so a judge reads the promise on
+      the door and the product makes good on it one screen later. Verified rendering at
+      1280px and 390px.
+- [ ] **Say it in the description.** Ready to paste:
+
+> **Signing in.** Challenge Accepted asks for a Google sign-in — one click, nothing to
+> install, no approval step. The wall is the feature: a quest is private to the party
+> working on it, which is what lets one teammate's discovery reach the others
+> *attributed to them by name*. `scripts/check_auth_live.py` is written entirely from
+> the outside to prove it holds — with no token, an unsigned token, and as a real
+> signed-in stranger holding a leaked challenge id, every read is refused.
 
 ---
 

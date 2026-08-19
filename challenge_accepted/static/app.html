@@ -524,7 +524,29 @@
 <div id="gate" hidden>
   <div class="gatecard" role="dialog" aria-modal="true" aria-labelledby="gate-h">
     <h2 id="gate-h">CHALLENGE ACCEPTED</h2>
-    <p>Quests are shared with the people you invite, so we need to know who you are.</p>
+    <!--
+      This is the only screen a stranger sees before deciding whether to bother, and
+      for a hackathon judge arriving cold off a submission page, bouncing here means
+      scoring the entry on nothing at all.
+
+      The old copy explained the wall and never said what was behind it. It answered
+      "why are you asking" for somebody who had not yet been given a reason to care.
+
+      So: what it does, then why it needs a name, then the cost of finding out. The
+      first line is deliberately the Warden's own opening line from the chat panel --
+      a judge reads it here, signs in, and the app says it again. That is continuity,
+      not repetition: the promise on the door is the first thing the product makes
+      good on.
+
+      The wall is a feature and should read as one. A quest is private to its party;
+      that is what makes "Derek found this" mean anything, and `check_auth_live.py`
+      exists to prove a stranger with a leaked id gets 403. Saying so here turns the
+      riskiest thing on this screen into the point of it.
+    -->
+    <p>Name something you want to be true that isn’t yet. It asks what it needs to
+       know, maps it into steps, and builds the tool each step needs.</p>
+    <p>A quest is private to you and the people you invite — so it needs to know who
+       you are. One click, nothing to install.</p>
     <button id="gate-in" class="send">Sign in with Google</button>
     <p id="gate-err" class="gate-err" hidden></p>
   </div>
