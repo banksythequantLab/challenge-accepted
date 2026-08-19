@@ -124,10 +124,25 @@ paraphrased it and got the hashtag wrong — see the warning below.
       > looking, to whoever wrote it, exactly like a post that scored 0.2. Copy the
       > tag from the draft; do not retype it.
 
-- [ ] **Additional Google AI models: +0.2 each, max +0.6.** *"Earn 0.2 bonus points
+- [x] **Additional Google AI models: +0.2 each, max +0.6.** *"Earn 0.2 bonus points
       for each additional Google AI model successfully integrated (such as Gemma, Veo,
       or Lyria), up to a maximum of 0.6 total bonus points."*
-      See "The additional-model bonus" below for why this one is not a free 0.6.
+
+      **Gemma 4 is integrated and live: +0.2 claimed.** The Archivist runs on
+      `gemma-4-26b-a4b-it-maas`. Evidence a judge can check without taking our word:
+      `https://challengeaccepted.app/api/healthz` names the serving model per tier.
+      Proved end to end on the deployed service — `scripts/check_archivist_model.py`
+      (tool calls, not prose) and `scripts/check_party_live.py` (a teammate inherited
+      a fact Gemma recorded). Reasoning is in `config.MODEL_ARCHIVIST`.
+
+      **The other two are not being chased, and that is a decision rather than a
+      shortfall.** Veo and Lyria have no job in a goal-decomposition app. Bolting video
+      or music generation onto it to collect +0.2 would put a visible bolt-on in front
+      of the 30% *Architectural Discipline* criterion, whose whole subject is scope
+      control — and this submission's argument there is a deliberately **closed**
+      seven-type tool taxonomy. Trading a credible hit on 30% for a possible 0.2 is a
+      bad trade. `gemini-embedding-001` is also in production for fact ranking, but it
+      is a Gemini model rather than an "additional" one, so it is not claimed either.
 
 Source: <https://allthingsagentichackathon.devpost.com/rules>
 

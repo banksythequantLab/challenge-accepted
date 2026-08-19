@@ -65,8 +65,20 @@ warden  (coordinator, gemini-3.6-flash)
 └── scout           AgentTool                  grounded search, on demand
 ```
 
-**Stack:** Google ADK 2.6.3 · Gemini 3.6 Flash + 3.5 Flash-Lite · Cloud Run · Firestore ·
-Vertex AI Memory Bank on Agent Engine · FastAPI.
+**Stack:** Google ADK 2.6.3 · Gemini 3.6 Flash + 3.5 Flash-Lite · **Gemma 4** (open
+model, Vertex MaaS) · `gemini-embedding-001` · Cloud Run · Firestore · Vertex AI Memory
+Bank on Agent Engine · FastAPI.
+
+**Three model tiers, and the third one is open.** Reasoning tier where judgement is
+needed; Flash-Lite for bookkeeping; and `gemma-4-26b-a4b-it-maas` for the Archivist,
+the one agent that only transcribes — it does not decide, plan, grade evidence or write
+code, and its output is purely additive, so a weaker answer costs a thinner journal
+entry rather than a broken phase. It rides the *same* Vertex credentials and the same
+global endpoint as everything else: no API key, no deployed endpoint, no GPU. That was
+the deciding factor — Gemma on the Gemini Developer API would have meant a second auth
+surface, which is precisely what caused the outage described below. `/api/healthz`
+names the serving model for each tier, so "is Gemma actually running?" is answerable
+from outside without taking our word for it.
 
 Three things that line does *not* claim, because they are not true and a stack list is
 the easiest place in a submission to lie by omission:
@@ -355,7 +367,19 @@ don't call a model — which is the actual lesson.
   near-black on a white page. `check_theme.py` reads the *rendered* luminance of every
   painted surface and fails if one stayed dark; `check_a11y.py` runs contrast in both
   themes (worst: 5.60:1 dark, 4.86:1 light, against a 4.5:1 floor).
-- **241 tests plus 33 live checks that sign in**, including a regression test for
+- **An open model doing real work, proved on the deployed service.** The Archivist runs
+  on Gemma 4, and the risk was never quality — it was that a MaaS model might answer in
+  *prose*. The Archivist's job is to **call** `write_journal` and `remember_group_fact`;
+  a model that understands perfectly and replies *"Sure, I've noted that down"* gives
+  you an agent that looks healthy, logs nothing, and takes the party's shared memory
+  with it. So that question got asked before anything was wired up, against the live
+  endpoint with the real tool schemas: 2 tool calls, no prose, 2.36s against Flash-Lite's
+  1.79s — 0.6s slower, between turns, in a phase nobody watches. Then the whole
+  collaborative beat was re-run on production with Gemma serving: a stranger with an
+  invite link inherited *"Must host on Vercel due to GCP billing/admin restrictions"*
+  and was handed a live node. Backing it out is one `gcloud run services update`, no
+  rebuild.
+- **256 tests plus 34 live checks that sign in**, including a regression test for
   every bug above. The checks click the actual controls and read the clipboard, the
   iframe and the resulting prompt string back — `check_feedback.py` follows a
   thumbs-down all the way into the Quartermaster's instruction, because "the loop is
