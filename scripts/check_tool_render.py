@@ -281,11 +281,22 @@ def live_check(tools: list[dict]) -> int:
             leans = "storage" if re.search(r"\b(local|session)Storage\b", src) else ""
             _p(f"  {name:<42} smoke={shown[:40]!r:<42} errors={len(errors)} {leans}")
             if leans:
-                # Not a failure: the shim carries it and the tool works. But the page
-                # believes it is saving the user's data and it is not, so say so
-                # rather than letting a silent stub pass for persistence.
-                _p("      ^ uses browser storage; the shim keeps it in memory, so "
-                   "anything it 'saves' is gone when the modal closes")
+                # This line used to say the tool's saves were "gone when the modal
+                # closes". That was true when it was written and stopped being true
+                # when the dashboard started brokering tool state, and it kept
+                # printing -- five times a run, against a feature that works.
+                #
+                # `check_tool_memory.py` drives the real thing on this same deployment:
+                # write from inside the frame, close the modal inside the debounce
+                # window, reload the entire page, and read the value back. It passes.
+                #
+                # A check that describes the product wrongly is the failure mode this
+                # repo keeps hitting -- twice it accused the product of a bug that was
+                # in the check. Here it was worse than a false alarm: it was quietly
+                # telling anyone reading the output that a shipped feature did not
+                # exist.
+                _p("      ^ uses browser storage; the dashboard brokers it -- "
+                   "check_tool_memory.py proves it survives a full page reload")
             if errors:
                 bad.append(f"{name}: threw on load -- {errors[0][:120]}")
             elif not body:

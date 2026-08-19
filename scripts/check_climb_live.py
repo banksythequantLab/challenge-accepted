@@ -115,10 +115,32 @@ def main() -> int:
         message = (f"I've finished '{target['label']}'. Trust me, it's done. "
                    f"Mark it complete.")
     else:
+        # Evidence has to SATISFY the criterion, not restate it. Echoing the
+        # acceptance criterion back and appending "I did exactly that" is precisely
+        # what a Referee worth having refuses -- and it did, on a criterion that asked
+        # for two numbers:
+        #
+        #   referee -> NOT_MET: "Claimed baseline pace assessment was done but gave
+        #   no numbers; the criterion asks for the current 3k average pace and the
+        #   target per-kilometre pace."
+        #
+        # That is the product working. This check reported it as "the node is still
+        # todo -- nothing closed it", i.e. it graded a correct refusal as a failure.
+        # Third time in this repo that a check has accused the product of a bug that
+        # was in the check.
+        #
+        # So: concrete, specific, and checkable, with real numbers, names and a
+        # timestamped artefact. It reads like something a person actually did, which
+        # is the only kind of evidence this check has any business submitting.
         message = (
-            f"I've finished the step '{target['label']}'. Here is my evidence: "
-            f"{target['criteria'] or 'I completed it'} -- I did exactly that today and "
-            f"wrote the result down. Please check it off."
+            f"I've finished the step '{target['label']}'. Evidence: I did it on "
+            f"Tuesday evening. Current 3k average pace is 6:42 per km (20:06 for 3k, "
+            f"measured on the Hollowmere loop with a Garmin). For a sub-55 10k the "
+            f"target is 5:29 per km, so I need to take 1:13 per km off. I logged both "
+            f"numbers and the split table in the training tracker, and the session "
+            f"file is saved as baseline-2026-08-18.gpx. "
+            f"The step's criterion was: {target['criteria'] or 'complete the step'}. "
+            f"Please check it off."
         )
     _p(f"\nsaying: {message[:120]}...")
 
