@@ -126,6 +126,13 @@ def main() -> None:
         if s.connect_ex(("127.0.0.1", PORT)) == 0:
             sys.exit(f"FAIL: something is already listening on {PORT}. Kill it first.")
 
+    # This check fabricates OTHER_CHALLENGES junk quests on purpose. Refuse before
+    # writing any of them if the store is not the scratch one -- pointed at Firestore
+    # by a stray GOOGLE_CLOUD_PROJECT it will happily litter a real database, and then
+    # fail on a party size it created itself. Both of those happened.
+    from testauth import require_local_store
+    require_local_store()
+
     _instrument()
     cid = seed()
     # Everyone else's quests. They are never opened; they only have to exist.

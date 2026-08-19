@@ -175,6 +175,38 @@ def require_shared_store(base: str) -> None:
         )
 
 
+def require_local_store() -> None:
+    """The mirror of `require_shared_store`, and it exists because of a real accident.
+
+    Some checks seed a fixture and drive the DEPLOYED service against it, so they need
+    this process pointed at the same Firestore. Others -- `check_poll_cost.py` above
+    all -- stand up their own local server and fabricate a store full of junk on
+    purpose: 24 "Someone else's goal" challenges, to measure what an end-of-judging
+    picker costs. Those two needs are opposites, and the env var that satisfies one
+    silently breaks the other.
+
+    A sweep that exported GOOGLE_CLOUD_PROJECT once, for every check, is all it took.
+    `check_poll_cost.py` wrote its 24 fabricated challenges into PRODUCTION Firestore,
+    and because the local page auto-joins with auth off it also grew `grp_team` to 16
+    members. The check then failed at 150 reads/minute against its budget of 120 --
+    correctly, honestly, and about a party size it had created itself.
+
+    Nothing was lost and nothing real was touched. But a check that fabricates data
+    must be certain it is fabricating into a scratch store, and "certain" cannot mean
+    "whoever ran it remembered". So: refuse.
+    """
+    from challenge_accepted.services.store import store
+
+    if store.backend != "memory":
+        raise SystemExit(
+            f"this check fabricates a store full of junk and would write it into "
+            f"'{store.backend}'. That is a real database with real quests in it.\n"
+            "    Unset GOOGLE_CLOUD_PROJECT for this check:\n"
+            "        set GOOGLE_CLOUD_PROJECT=            (cmd)\n"
+            "        $env:GOOGLE_CLOUD_PROJECT = $null    (PowerShell)"
+        )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--uid", default=None, help="test identity to mint for")
