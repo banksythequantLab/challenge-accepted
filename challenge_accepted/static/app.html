@@ -1885,8 +1885,23 @@ $('invite').onclick = async e => {
     const { token } = await api(`/challenges/${challengeId}/invite`);
     copyText(token ? `${base}&k=${encodeURIComponent(token)}` : base, e.target);
   } catch (err) {
-    console.error(err);
-    copyText(base, e.target);   // better a link that needs a re-send than no link
+    //: This used to `copyText(base)` with the comment "better a link that needs a
+    //: re-send than no link". It is not better. A link with no `&k=` is not a link
+    //: that needs a re-send -- it is a link that CANNOT work: the recipient gets 403
+    //: and an offer to join that the server will refuse. The button still said
+    //: "Copied", so the sender believed they had shared a working invite and the only
+    //: person able to fix it was the one person not told.
+    //:
+    //: That is the same silent-wrong-thing this project keeps getting bitten by, on
+    //: the one beat the whole collaboration story rests on. So: copy nothing, and say
+    //: so on the button. A dead link in the clipboard is worse than an empty one,
+    //: because it gets pasted.
+    console.error('could not fetch the invite token', err);
+    const label = e.target.textContent;
+    e.target.textContent = err.status === 403
+      ? 'Only members can invite'
+      : 'Could not get a link — try again';
+    setTimeout(() => { e.target.textContent = label; }, 3000);
   }
 };
 

@@ -88,9 +88,32 @@ def snapshot(page) -> dict:
     }
 
 
+def wait_for_dashboard(page, timeout_ms: int = 30000) -> bool:
+    """Wait for the quest to actually arrive, rather than sleeping and hoping.
+
+    `open_as` waits a fixed 3 seconds after sign-in. On a cold Cloud Run instance the
+    dashboard has not landed by then, and a snapshot taken in that window reads
+    `nodes: 0` and the empty-state title -- which this check then reported as "the
+    owner cannot see the map of their own challenge", four times over, about a
+    challenge whose map was fine.
+
+    A fixed wait that is slightly too short does not fail; it lies. Wait for the
+    thing.
+    """
+    try:
+        page.wait_for_function(
+            "() => document.querySelectorAll('#graph .node').length > 0"
+            " || (document.getElementById('c-nodes')"
+            "     && +document.getElementById('c-nodes').textContent > 0)",
+            timeout=timeout_ms)
+        return True
+    except Exception:
+        return False
+
+
 def main() -> int:
     if len(sys.argv) < 2:
-        _p("usage: check_party_ui.py <challenge_id> [base_url]")
+        _p("usage: check_party_ui.py <challenge_id> --owner <uid> [base_url]")
         return 2
     args = sys.argv[1:]
     owner_uid = None
@@ -100,6 +123,25 @@ def main() -> int:
         del args[i:i + 2]
     cid = args[0]
     base = (args[1] if len(args) > 1 else DEFAULT_URL).rstrip("/")
+
+    # `--owner` is required, and this check ran for a while without noticing that it
+    # had become required. It was written when possession of `?id=<cid>` WAS access:
+    # any identity could open the link and join. Rotatable invite keys ended that --
+    # a link with no `&k=` is 403 now, by design, and that is the feature.
+    #
+    # So without --owner the "owner" here is a stranger who cannot get in, sees an
+    # empty screen, and the check reports SIX product bugs that are all the same
+    # fixture mistake: no map, no tools, no party, nothing learned. Every one of them
+    # a lie about a working product.
+    #
+    # A check that has quietly outlived the design it was written against is worse
+    # than no check. Refuse, and say which.
+    if not owner_uid:
+        _p("--owner <uid> is required. A bare ?id= link stopped being a way in when "
+           "rotatable invite keys shipped, so without the real owner this check signs "
+           "in as a stranger, sees an empty screen, and reports the product as broken "
+           "in six different ways. Pass the uid that created the challenge.")
+        return 2
 
     from playwright.sync_api import sync_playwright
 
@@ -117,6 +159,7 @@ def main() -> int:
         # challenge; otherwise this identity joins like anyone else with the link.
         if take_the_invite(a):
             _p("owner  : joined via the invite (not the original creator)")
+        wait_for_dashboard(a)
         sa = snapshot(a)
         _p(f"owner  : {sa}")
         if not sa["nodes"]:
@@ -145,6 +188,7 @@ def main() -> int:
         if not joined and not before["nodes"]:
             bad.append("the invite link offered no way in and showed no map: "
                        "a teammate arrives at a dead end")
+        wait_for_dashboard(b)
         sb = snapshot(b)
         _p(f"mate   : {sb}")
 
