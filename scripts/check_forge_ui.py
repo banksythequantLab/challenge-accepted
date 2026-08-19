@@ -38,6 +38,7 @@ from fastapi import FastAPI, Request  # noqa: E402
 from fastapi.responses import FileResponse, StreamingResponse  # noqa: E402
 
 from challenge_accepted.api import router  # noqa: E402
+from challenge_accepted.config import FORGE_WORKERS  # noqa: E402
 from seed_demo import main as seed  # noqa: E402
 
 PORT = 8144
@@ -89,6 +90,18 @@ SCRIPT: list[tuple[float, str]] = [
     (0.3, ev("toolwright_0", text="Taking spec for pacing calculator.")),
     (0.1, ev("toolwright_2", text="Taking spec for the checklist.")),
     (0.2, ev("toolwright_1", text="Taking spec for the hosting brief.")),
+    # The rail builds a lane per worker on demand, so the only way to know it copes
+    # with the CURRENT fan-out is to drive the current fan-out. This script simulated
+    # four workers long after production went to eight -- not wrong about the product,
+    # just quietly testing a narrower thing than ships. The high slots are the ones
+    # that would break a fixed-height rail or an off-screen overflow, and they were
+    # never exercised.
+    *[(0.05, ev(f"toolwright_{i}", text="Taking spec for a tool."))
+      for i in range(4, FORGE_WORKERS)],
+    *[(0.05, ev(f"toolwright_{i}", functionCall={"name": "save_tool"}))
+      for i in range(4, FORGE_WORKERS)],
+    # Slot 3 stays the idle one. An empty slot has to READ as idle rather than as a
+    # worker that died, which is a distinction the rail exists to make.
     (0.2, ev("toolwright_3", text="idle")),
     (0.3, ev("toolwright_0", executableCode={"code": "print(1)"})),
     (0.2, ev("toolwright_2", executableCode={"code": "print(2)"})),
@@ -199,11 +212,19 @@ def main() -> None:
     if order != sorted(order):
         failures.append(f"lanes are out of order ({order}) -- they will reshuffle on "
                         "screen and look like a bug")
-    if len(lanes) != 4:
-        failures.append(f"expected 4 worker lanes, got {len(lanes)}")
+    # Derived from the script, not written down twice. Hardcoded at 4 and 3, these
+    # two lines reported three failures the day the fan-out went to eight -- about a
+    # rail that had rendered all eight lanes, in order, with no console errors. An
+    # expectation that has to be edited by hand every time the product changes is an
+    # expectation that will one day be edited to match a bug.
+    expected_lanes = FORGE_WORKERS
+    expected_shipped = FORGE_WORKERS - 1   # slot 3 is the idle one
+    if len(lanes) != expected_lanes:
+        failures.append(f"expected {expected_lanes} worker lanes, got {len(lanes)}")
     shipped = [l for l in lanes if l["done"]]
-    if len(shipped) != 3:
-        failures.append(f"expected 3 lanes to finish shipped, got {len(shipped)}")
+    if len(shipped) != expected_shipped:
+        failures.append(
+            f"expected {expected_shipped} lanes to finish shipped, got {len(shipped)}")
     if any(l["bad"] for l in lanes):
         failures.append("a lane is still marked failed after its retry succeeded")
     idle = [l for l in lanes if "idle" in l["what"].lower()]
