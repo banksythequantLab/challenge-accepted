@@ -50,6 +50,45 @@ MODEL_TOOLWRIGHT: str = os.getenv("CA_MODEL_TOOLWRIGHT", MODEL_REASONING)
 #: $0.30 / $2.50 per 1M tokens.
 MODEL_CHEAP: str = os.getenv("CA_MODEL_CHEAP", "gemini-3.5-flash-lite")
 
+#: Archivist only. An OPEN model, and the third rung of a ladder this codebase was
+#: already climbing: reasoning tier for judgement, Flash-Lite for bookkeeping, and now
+#: Gemma for the one agent that is pure transcription.
+#:
+#: The Archivist reads a turn and records what was learned. It exercises no judgement
+#: the user sees -- it does not decide, plan, grade evidence or write code. That is the
+#: profile a small open model handles, and the profile where paying reasoning-tier
+#: rates is waste.
+#:
+#: WHY THIS ONE IS SAFE TO MOVE AND THE OTHERS ARE NOT: it is `mode="single_turn"` with
+#: `disallow_transfer_to_parent`, so it cannot redirect the conversation; its output is
+#: journal entries and group facts, both of which are additive; and if it produces
+#: nothing the run continues. Every other agent in the tree either gates a phase or
+#: writes something a later phase depends on.
+#:
+#: THE MODEL ID IS NOT OPTIONAL DETAIL. `gemma-4-26b-a4b-it-maas` is Model-as-a-Service:
+#: no deployed endpoint, no GPU, no API key, and -- the part that decided it -- the SAME
+#: Vertex credentials the rest of the app already uses. The alternative was Gemma on the
+#: Gemini Developer API, which needs an API key on generativelanguage.googleapis.com,
+#: and a second auth surface is exactly what produced this repo's worst outage
+#: (`include_server_side_tool_invocations` is required on one and RAISES on the other).
+#: A bonus point is not worth re-opening that.
+#:
+#: It is served ONLY from the global endpoint. Measured, against this project:
+#:
+#:     location=us-central1  -> 400 FAILED_PRECONDITION, "only available via global"
+#:     location=global       -> 200
+#:
+#: which is fine here because GOOGLE_CLOUD_LOCATION is already `global` in production
+#: (Gemini 3.x is served from there). It is written down because the Agent Engine
+#: regional/global split cost a day once already, and this is the same trap facing the
+#: other way.
+#:
+#: Function calling was verified before any of this was wired up -- a MaaS model that
+#: answered in prose would have made the Archivist silently stop recording, which is
+#: the failure mode this repo has the most scar tissue about. `tests/test_archivist_
+#: model.py` pins the config; `scripts/check_archivist_model.py` proves the live call.
+MODEL_ARCHIVIST: str = os.getenv("CA_MODEL_ARCHIVIST", "gemma-4-26b-a4b-it-maas")
+
 # --- Google Cloud -----------------------------------------------------------
 
 GOOGLE_CLOUD_PROJECT: str | None = os.getenv("GOOGLE_CLOUD_PROJECT")

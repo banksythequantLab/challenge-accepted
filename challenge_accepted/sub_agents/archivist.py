@@ -15,7 +15,12 @@ from ..services.tools import read_challenge_state, remember_group_fact, write_jo
 
 archivist = LlmAgent(
     name="archivist",
-    model=config.MODEL_CHEAP,
+    # Gemma, not the Flash-Lite bookkeeping tier. This agent transcribes; it does not
+    # judge, plan, grade or generate code, and it is the only one in the tree whose
+    # output is purely additive -- so it is the only one where an open model can be
+    # tried without putting a phase at risk. The reasoning, the model id and the
+    # global-endpoint constraint are all in `config.MODEL_ARCHIVIST`.
+    model=config.MODEL_ARCHIVIST,
     description=(
         "Records what was learned: a visible journal entry, plus durable group facts "
         "that other teammates and future sessions should inherit. Use after any turn "

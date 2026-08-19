@@ -261,6 +261,10 @@ def healthz() -> dict[str, Any]:
             # and "which model built these tools" is the first question to ask when a
             # deployment starts shipping worse ones.
             "toolwright": config.MODEL_TOOLWRIGHT,
+            # The open model. Reported by name because "is Gemma actually serving, or
+            # did an env var quietly put the Archivist back on Gemini?" is not a
+            # question anyone should have to answer by reading a deploy log.
+            "archivist": config.MODEL_ARCHIVIST,
         },
     }
 

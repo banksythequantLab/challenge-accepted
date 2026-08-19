@@ -17,7 +17,7 @@ Every one of these is a hard gate. Missing any is elimination before anything is
 | # | Requirement | Status |
 |---|---|---|
 | 1 | **Hosted project link** — "a URL to the hosted Project … for judging and testing" | ☐ `https://challengeaccepted.app` |
-| 2 | **Text description** — features, functionality, technologies, data sources, learnings | ☐ `docs/DEVPOST.md` needs an accuracy pass |
+| 2 | **Text description** — features, functionality, technologies, data sources, learnings | ☑ `docs/DEVPOST.md`, accuracy pass done — still has to be **pasted into the form** |
 | 3 | **Code repository** — public, or share with `testing@devpost.com` and `cloudhackathons@google.com` | ☐ public at `banksythequantLab/challenge-accepted` — confirm it is current |
 | 4 | **Architecture diagram** — "a clear visual representation of your system" | ☑ `docs/architecture.png` |
 | 5 | **Demonstration video** — see below | ☐ |
@@ -26,6 +26,7 @@ Every one of these is a hard gate. Missing any is elimination before anything is
 | 8 | **A Google Cloud infra service** (Cloud Run / Cloud SQL / Firestore / GKE / Pub-Sub) | ☑ Cloud Run + Firestore |
 | 9 | **One category selected** | ☐ Collaborative Partner |
 | 10 | **Free and unrestricted for judges until judging ends** | ⚠ see *The sign-in wall* below |
+| 11 | **Spin-up instructions in `README.md`** — listed in the requirements alongside the repo link, and scored again under Demo & Production Readiness ("setup reproducibility") | ☑ `README.md` — local run and `deploy\deploy.ps1`. Worth one cold read by someone who has never run it |
 
 ---
 
@@ -100,13 +101,35 @@ levers available have been spent — see `config.FORGE_WORKERS` and
 | 30% | Architectural Discipline & Tech Stack | Engineering decisions, decoupling, state management, failure tolerance, modularisation, security isolation |
 | 30% | Demo & Production Readiness | Documentation clarity, the unedited-live-execution question, repo quality and setup reproducibility |
 
-Stage Three bonus, **max +0.6 on a 1–6 scale**, currently all unclaimed:
+Stage Three bonus, **max +0.6 on a 1–6 scale**, currently all unclaimed. Quoted from
+the rules page rather than paraphrased, because the first version of this section
+paraphrased it and got the hashtag wrong — see the warning below.
 
-- [ ] Published content — blog or video: **+0.2**
-- [ ] Social post with **#AllThingsAgentic**: **+0.2**
-- [ ] Additional Google AI models (Gemma, Veo, Lyria): **+0.2 each**, max 0.6.
-      `gemini-embedding-001` is already in production for group-memory ranking — worth
-      checking whether it counts before assuming it does.
+- [ ] **Published content: +0.2.** *"Publish a piece of content (blog, podcast,
+      video): Covering how the project was built on any public platform."* Two
+      conditions that are easy to miss and are worth the whole 0.2 on their own:
+      *"The content must be public (not unlisted)"* and *"You must include language
+      that says you created the piece of content for the purposes of entering this
+      hackathon."* Link goes in the submission form.
+      Draft ready: `docs/BUILD_WRITEUP.md`.
+
+- [ ] **Social post: +0.2.** *"Publish a social media post: Highlight or promote your
+      project on social media post on X, LinkedIn, Instagram, or Facebook."* The tag is
+      **`#AllThingsAgenticHackathon`** — *"For any social media posts on platforms such
+      as X or LinkedIn, include the hashtag #AllThingsAgenticHackathon."*
+      Link goes in the submission form. Drafts ready: `docs/SOCIAL_POST.md`.
+
+      > ⚠️ This file previously said the tag was `#AllThingsAgentic`. It is not.
+      > A post with the short tag is a post that scores zero for this bonus while
+      > looking, to whoever wrote it, exactly like a post that scored 0.2. Copy the
+      > tag from the draft; do not retype it.
+
+- [ ] **Additional Google AI models: +0.2 each, max +0.6.** *"Earn 0.2 bonus points
+      for each additional Google AI model successfully integrated (such as Gemma, Veo,
+      or Lyria), up to a maximum of 0.6 total bonus points."*
+      See "The additional-model bonus" below for why this one is not a free 0.6.
+
+Source: <https://allthingsagentichackathon.devpost.com/rules>
 
 ---
 
