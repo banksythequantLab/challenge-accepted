@@ -211,6 +211,10 @@ def healthz() -> dict[str, Any]:
         "models": {
             "reasoning": config.MODEL_REASONING,
             "cheap": config.MODEL_CHEAP,
+            # Reported separately because it can now differ from the reasoning tier,
+            # and "which model built these tools" is the first question to ask when a
+            # deployment starts shipping worse ones.
+            "toolwright": config.MODEL_TOOLWRIGHT,
         },
     }
 

@@ -319,7 +319,9 @@ def _worker(index: int) -> LlmAgent:
     """
     return LlmAgent(
         name=f"toolwright_{index}",
-        model=config.MODEL_REASONING,
+        # Its own knob, not the shared reasoning tier -- this is the only agent whose
+        # latency the user sits and watches. See `config.MODEL_TOOLWRIGHT`.
+        model=config.MODEL_TOOLWRIGHT,
         description=f"Builds the tool assigned to forge slot {index}.",
         instruction=(
             prompts.TOOLWRIGHT

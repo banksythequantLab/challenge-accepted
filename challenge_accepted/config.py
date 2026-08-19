@@ -13,9 +13,27 @@ import os
 
 # --- Models -----------------------------------------------------------------
 
-#: Reasoning tier. Warden, Interviewer, Cartographer, Quartermaster, Toolwright,
-#: Coach, Scout. $1.50 / $7.50 per 1M tokens.
+#: Reasoning tier. Warden, Interviewer, Cartographer, Quartermaster, Coach, Scout.
+#: $1.50 / $7.50 per 1M tokens.
 MODEL_REASONING: str = os.getenv("CA_MODEL_REASONING", "gemini-3.6-flash")
+
+#: Toolwright only, and split out from the reasoning tier because it is the one agent
+#: whose latency the user WATCHES.
+#:
+#: Everything else in the tree answers in seconds between turns. FORGE is a single
+#: unbroken wait: one batch of Toolwrights costs whatever the slowest one costs, and
+#: measured on the deployed service that was 2m57s of a ~4m44s cold run. It is also
+#: the most constrained job in the tree -- a fixed spec, seven allowed shapes, a
+#: self-checking smoke test -- which is the profile that survives a cheaper model
+#: better than open-ended reasoning does.
+#:
+#: Set to the reasoning model by default so nothing changes without a decision, and
+#: overridden per deployment while the trade-off is being measured rather than
+#: guessed at. Quality regression here is visible and cheap to detect:
+#: `scripts\check_tool_render.py --browser` opens every tool and reads back the worked
+#: example it is required to render, so a model that ships plausible-looking broken
+#: HTML fails that check rather than reaching a judge.
+MODEL_TOOLWRIGHT: str = os.getenv("CA_MODEL_TOOLWRIGHT", MODEL_REASONING)
 
 #: Bookkeeping tier. Archivist, Referee, classifiers, summarizers.
 #: $0.30 / $2.50 per 1M tokens.
