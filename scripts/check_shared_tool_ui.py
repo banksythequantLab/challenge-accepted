@@ -52,9 +52,15 @@ LEDGER = """<!doctype html><meta charset="utf-8"><body>
 
 def main() -> int:
     base = (sys.argv[1] if len(sys.argv) > 1 else DEFAULT_URL).rstrip("/")
-    from testauth import PREFIX, mint
+    from testauth import PREFIX, mint, require_shared_store
 
     from challenge_accepted.services.store import store
+
+    # This check seeds its fixture through `store` and then drives the deployed
+    # service against it, so the two have to be the same database. Checked first,
+    # because the failure otherwise arrives 30 seconds later as a Playwright timeout
+    # that reads like the product cannot open a tool.
+    require_shared_store(base)
 
     health = requests.get(f"{base}/api/healthz", timeout=60).json()
     _p(f"target : {base}")

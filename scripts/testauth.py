@@ -137,6 +137,44 @@ def headers(uid: str | None = None) -> dict[str, str]:
     return {"Authorization": "Bearer " + mint(uid)}
 
 
+def require_shared_store(base: str) -> None:
+    """Refuse to run a seeding check whose writes the target cannot see.
+
+    Several checks build their fixture by calling `store` directly and then drive the
+    deployed service against it. That only works if this process's store is the same
+    Firestore the service reads -- and `Store` falls back to an in-memory dict, by
+    design, when `GOOGLE_CLOUD_PROJECT` is unset.
+
+    Run one of those checks in a shell without it and the seed goes into a dict that
+    dies with the process. The service then answers 404 for a challenge the check
+    believes it just created, and the failure surfaces however that particular check
+    happens to notice -- for check_shared_tool_ui.py it was a 30-second Playwright
+    timeout waiting for a tool to appear, with a stack trace pointing at
+    `wait_for_function` and nothing anywhere naming the actual cause. Ten minutes of
+    reading the product for a mistake in the shell.
+
+    So: say the true thing, before doing any work.
+    """
+    import requests
+
+    from challenge_accepted.services.store import store
+
+    mine = store.backend
+    try:
+        theirs = requests.get(f"{base}/api/healthz", timeout=60).json().get("store")
+    except Exception as exc:                                   # noqa: BLE001
+        raise SystemExit(f"cannot reach {base}/api/healthz: {exc}") from None
+
+    if mine != theirs:
+        raise SystemExit(
+            f"this process seeds into '{mine}' but {base} reads '{theirs}', so nothing "
+            "this check writes will be visible to the service and every assertion "
+            "after the seed would be a lie about a working product.\n"
+            "    set GOOGLE_CLOUD_PROJECT=<project-id>   (cmd)\n"
+            "    $env:GOOGLE_CLOUD_PROJECT = '<project-id>'   (PowerShell)"
+        )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--uid", default=None, help="test identity to mint for")

@@ -44,9 +44,14 @@ def _p(s: str) -> None:
 
 def main(base: str) -> int:
     base = base.rstrip("/")
-    from testauth import PREFIX, mint
+    from testauth import PREFIX, mint, require_shared_store
 
     from challenge_accepted.services.store import store
+
+    # The target being on Firestore is checked below. This checks the other end: that
+    # THIS process seeds into the same one, rather than into the in-memory fallback
+    # `Store` uses when GOOGLE_CLOUD_PROJECT is unset.
+    require_shared_store(base)
 
     health = requests.get(f"{base}/api/healthz", timeout=60).json()
     _p(f"target : {base}")

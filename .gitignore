@@ -59,3 +59,18 @@ _h.log
 _walk/
 _video/
 _video_run.log
+
+# Every check writes its evidence to a leading-underscore file in the repo root, and
+# the list above grew one line at a time -- which means each new check leaves a stray
+# artifact in `git status` until somebody notices. `_shared_tool.png` sat there for a
+# day. These four rules cover the pattern; the named lines above are kept because
+# deleting them would only churn the diff.
+#
+# .gitignore does not apply to files already tracked, so the `_dev_*.png` screenshots
+# in the repo stay under version control regardless. The negation is here to say so
+# out loud rather than leave it to be rediscovered.
+_*.png
+_*.jpg
+_*.log
+_*.err
+!_dev_*.png
