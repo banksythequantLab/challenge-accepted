@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from typing import Any, Optional
 
 from google.adk.tools import ToolContext
@@ -301,6 +302,56 @@ def _spec_is_shared(tool_context: ToolContext, node_id: str) -> bool:
     return False
 
 
+#: `document.getElementById('literal')`. Template literals and variables are skipped
+#: on purpose -- an id built at runtime cannot be checked without running the page.
+_LOOKUP = re.compile(r"""getElementById\(\s*["']([^"']+)["']\s*\)""")
+
+#: An id the markup declares, or one the script assigns to an element it created.
+_DECLARED = re.compile(r"""\bid\s*=\s*["']([^"'{}$]+)["']""")
+_ASSIGNED = re.compile(r"""\.id\s*=\s*["']([^"']+)["']""")
+
+
+def broken_element_lookups(source: str) -> list[str]:
+    """Ids the script reads that nothing in the source ever creates.
+
+    A generated calculator shipped to production with `smoke_test_passed=True` and
+    threw `Cannot set properties of null (setting 'textContent')` the moment anyone
+    opened it. One line:
+
+        document.getElementById('h2-mi').textContent = formatPaceMiles(p2);
+
+    The markup declared `h1-mi`, `h1-pace`, `h1-tip`, `h1-tot` for the first half and
+    `h2-final`, `h2-pace`, `h2-tip`, `h2-tot` for the second. Twenty-one ids declared,
+    twenty-one looked up, exactly one that did not line up -- the model wrote the
+    symmetric pair and then broke symmetry on one member of it. Everything after that
+    line in the update function never ran.
+
+    The Toolwright's smoke test cannot catch this, because the smoke test runs the
+    *calculation* and there is no DOM in the code executor. So the model tests the
+    half it can and certifies the half it cannot, honestly and wrongly. Anything a
+    machine can check should not be left to a model's word about itself -- that rule
+    is why the Referee grades evidence and why the Dispatcher is not an LlmAgent.
+
+    Deliberately conservative: an id is only reported when the literal appears in the
+    source EXACTLY ONCE, i.e. nowhere but the lookup itself. Ids injected through
+    `innerHTML`, built from template literals, or assigned in any form other than a
+    plain quoted literal all survive that test, so this flags typos rather than
+    styles it does not recognise. A false positive here would degrade a working tool,
+    which is a worse failure than the one being fixed.
+    """
+    if "getElementById" not in source:
+        return []
+    declared = set(_DECLARED.findall(source)) | set(_ASSIGNED.findall(source))
+    out = []
+    for name in dict.fromkeys(_LOOKUP.findall(source)):
+        if name in declared:
+            continue
+        if source.count(name) > 1:
+            continue                       # created some way this cannot see
+        out.append(name)
+    return out
+
+
 def save_tool(node_id: str, tool_type: str, name: str, source: str, usage: str,
               smoke_test_passed: bool, smoke_test_output: str,
               tool_context: ToolContext) -> dict[str, Any]:
@@ -323,6 +374,22 @@ def save_tool(node_id: str, tool_type: str, name: str, source: str, usage: str,
     if not cid:
         return {"status": "no_challenge", "message": "No challenge open."}
     shared = _spec_is_shared(tool_context, node_id)
+
+    # A machine can check this, so the model does not get to certify it. The tool is
+    # still SAVED -- refusing would risk losing it entirely if the worker does not
+    # retry, and a partly-working tool beats no tool -- but it is saved as degraded,
+    # with the reason, so the UI stops presenting it as tested. The message names the
+    # exact ids so a re-save is a one-line fix rather than a rewrite.
+    broken = broken_element_lookups(source) if isinstance(source, str) else []
+    if broken:
+        smoke_test_passed = False
+        smoke_test_output = (
+            f"{smoke_test_output}\n\n[save_tool] getElementById() reads "
+            f"{', '.join(repr(b) for b in broken)}, which nothing in this source "
+            "creates. Every line after that lookup stops running the moment a user "
+            "opens the tool."
+        ).strip()
+
     tid = store.put_tool(cid, node_id, {
         "type": tool_type, "name": name, "source": source, "usage": usage,
         "smoke_test_passed": smoke_test_passed, "smoke_test_output": smoke_test_output,
@@ -331,6 +398,19 @@ def save_tool(node_id: str, tool_type: str, name: str, source: str, usage: str,
     store.add_journal(cid, {"actor": "Toolwright", "kind": "build", "node_id": node_id,
                             "text": f"Built {tool_type} '{name}' "
                                     f"({'passed' if smoke_test_passed else 'DEGRADED'})"})
+    if broken:
+        return {
+            "status": "saved_degraded",
+            "tool_id": tid,
+            "broken_element_ids": broken,
+            "message": (
+                f"Saved, but marked degraded. The script calls getElementById on "
+                f"{', '.join(repr(b) for b in broken)} and no element in your markup "
+                "has that id, so the page throws `Cannot set properties of null` and "
+                "everything after that line stops. Fix the id and call save_tool "
+                "again with the corrected source."
+            ),
+        }
     return {"status": "ok", "tool_id": tid}
 
 
