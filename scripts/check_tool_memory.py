@@ -27,6 +27,7 @@ Exit 0 only if the value survives the reload. Costs no model calls.
 from __future__ import annotations
 
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -46,10 +47,56 @@ def in_frame(page, js: str):
     return page.frame_locator("#frame").locator("body").evaluate(js)
 
 
+def _clear(base: str, cid: str, tool_id: str, auth: dict, bad: list) -> None:
+    """Put the tool's state back to empty, and never let teardown fail the run.
+
+    This check writes a marker into a REAL tool on a REAL challenge, so it has to
+    clean up after itself -- leaving `logged-f07170ed` in somebody's prospect tracker
+    is rude. But cleanup is not the thing being measured, and a dropped TLS connection
+    on the way out should not turn a run where every assertion passed into a traceback
+    with no verdict at the bottom. That happened: persistence proved, checklist tick
+    proved, four tools opened clean, and then `ConnectionResetError` on the final PUT
+    swallowed the whole result.
+
+    So it retries once, and if it still cannot clear, it says so as a *finding* rather
+    than an exception -- because leftover state in a user's tool is worth knowing about
+    even when nothing about the product is broken.
+    """
+    for attempt in (1, 2):
+        try:
+            requests.put(f"{base}/api/challenges/{cid}/tools/{tool_id}/state",
+                         headers=auth, json={"state": {}}, timeout=60)
+            _p(f"cleaned up: {tool_id} state cleared")
+            return
+        except requests.RequestException as exc:                    # noqa: PERF203
+            if attempt == 2:
+                why = type(exc).__name__
+                bad.append(f"could not clear test state from {tool_id} ({why}); "
+                           "it may still be sitting in the user's tool")
+            else:
+                time.sleep(2)
+
+
 def open_tool(page, tool_id: str, timeout: int = 20000) -> None:
     # Calling the product's own opener rather than clicking a node, then a tool card.
     # That path is real but it is navigation, and a failure in it would be reported
     # here as "the tool does not remember" -- which would be a lie about this feature.
+    #
+    # WAIT FOR THE TOOL TO EXIST FIRST. `openTool` reads `toolsById`, which `refresh()`
+    # fills, and calling it before the dashboard has landed is a silent no-op: no
+    # iframe, no error, and 20s later a timeout that reads as "the tool would not
+    # open". That is what happened on a cold Cloud Run instance the first time this
+    # check was pointed at a freshly built challenge -- against eight tools that
+    # `check_tool_render.py --browser` had opened cleanly minutes earlier.
+    #
+    # `open_as` waits a fixed 3 seconds after sign-in, and a fixed wait that is
+    # slightly too short does not fail, it lies. Same fix as `wait_for_dashboard` in
+    # check_party_ui.py and the `toolsById` guard in check_shared_tool_ui.py -- this
+    # file is the third place to need it, which is three times the lesson has cost
+    # something.
+    page.wait_for_function(
+        "id => typeof toolsById !== 'undefined' && !!toolsById[id]",
+        arg=tool_id, timeout=timeout)
     page.evaluate("id => openTool(id)", tool_id)
     page.wait_for_selector("#frame", timeout=timeout)
     page.wait_for_timeout(700)
@@ -186,13 +233,9 @@ def main() -> int:
                 if not still:
                     bad.append("a checklist tick did not survive a reload -- it is "
                                "still browser-local, or it never saved")
-                requests.put(
-                    f"{base}/api/challenges/{cid}/tools/{checklist['id']}/state",
-                    headers=auth, json={"state": {}}, timeout=60)
+                _clear(base, cid, checklist["id"], auth, bad)
         finally:
-            requests.put(f"{base}/api/challenges/{cid}/tools/{tid}/state",
-                         headers=auth, json={"state": {}}, timeout=60)
-            _p("\ncleaned up: tool state cleared")
+            _clear(base, cid, tid, auth, bad)
             browser.close()
 
     if bad:
