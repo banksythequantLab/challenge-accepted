@@ -143,6 +143,42 @@ If you want it airtight: open the Cloud Run service page and the Logs Explorer, 
 both, drop them in `_video/shots/` as `gcp_shot_a.png` / `gcp_shot_b.png` and say so — I
 can splice them into segment 09 and re-render in about ten minutes. Optional. Your call.
 
+### Where those three values live
+
+Project `gen-lang-client-0955694243`. Re-verified against the Cloud Run Admin API on
+20 Aug: service, region and **serving revision are unchanged since the recording**, so a
+screenshot taken today matches the video frame exactly.
+
+**Cloud Run — service, region, revision, and the `.run.app` URL, all on one page:**
+
+```
+https://console.cloud.google.com/run/detail/us-central1/challenge-accepted/revisions?project=gen-lang-client-0955694243
+```
+
+**Logs Explorer — the FORGE lines from the run in the video:**
+
+```
+https://console.cloud.google.com/logs/query;query=resource.type%3D%22cloud_run_revision%22%0Aresource.labels.service_name%3D%22challenge-accepted%22%0A%22%5BFORGE%5D%22;timeRange=2026-08-20T14:55:00Z%2F2026-08-20T15:15:00Z?project=gen-lang-client-0955694243
+```
+
+If that link drops the query, paste this into the query box by hand:
+
+```
+resource.type="cloud_run_revision"
+resource.labels.service_name="challenge-accepted"
+"[FORGE]"
+```
+
+**Set the time range or you will see nothing.** The forge ran
+**20 Aug 2026, 15:03–15:05 UTC** — 11:03–11:05am your time. The default "Last 1 hour"
+returns zero rows, which is exactly what happened to me: `gcp_evidence.py` uses a
+6-hour window and now comes back empty, because the run is over eight hours old. The
+logs are fine; the window was short. Retention is 30 days, so this holds until 19 Sep.
+
+**The `.run.app` URL** is `https://challenge-accepted-xk3m7ygefa-uc.a.run.app`. The rules
+name "URL of .run" as acceptable proof on its own, and it is not on screen anywhere in the
+video. Adding it to the segment 09 card is a two-minute change and costs nothing.
+
 **2. The narration is your cloned voice.** FreeClone / VoxCPM2, your voice, your script.
 Nothing in the rules requires disclosing that and I would not volunteer it — but if
 anyone asks, that is the answer, and it is your own likeness, so there is no rights
