@@ -1,0 +1,239 @@
+{
+  "challenge": "chal_1a7cbac10402",
+  "goal": "$25,000 / month in 90 days, from directory and rank-and-rent sites",
+  "start": "$0 earned  |  $1,500 budget  |  34 domains",
+  "pulled_at": "2026-08-21T16:24:04+00:00",
+  "counts": {
+    "nodes": 15,
+    "done": 0,
+    "with_tool": 10,
+    "tools": 10
+  },
+  "nodes": [
+    {
+      "id": "budget-allocation-plan",
+      "title": "Create $1,500 Budget Allocation Plan",
+      "status": "todo",
+      "done": false,
+      "depends_on": [
+        "financial-unit-economics-model"
+      ],
+      "acceptance": "",
+      "tools": [
+        {
+          "name": "1500 Budget Allocation Model",
+          "type": null,
+          "usage": "Enter your total startup capital, run timeline (in months), domain counts, hosting costs, and call tracking budgets in the input panel. The model automatically computes fixed infrastructure expenses versus variable outreach growth funds, breaking down cash flow across citations, cold outreach software, lead lists, and monthly runway. Adjust the allocation sliders to rebalance growth spending. Your"
+        }
+      ]
+    },
+    {
+      "id": "call-tracking-setup",
+      "title": "Set Up Call Tracking and Form Routing",
+      "status": "todo",
+      "done": false,
+      "depends_on": [
+        "site-template-deployment"
+      ],
+      "acceptance": "",
+      "tools": []
+    },
+    {
+      "id": "close-first-lease-agreement",
+      "title": "Secure First Signed Client Lease Agreement",
+      "status": "todo",
+      "done": false,
+      "depends_on": [
+        "pre-sale-cold-outreach-campaign"
+      ],
+      "acceptance": "",
+      "tools": [
+        {
+          "name": "Trial-to-Paid Contract Closing Script",
+          "type": null,
+          "usage": "Use this closing script and objection handling playbook to convert contractor leads from free trial calls into signed $1,000/month flat-rate lease agreements. Read or customize the pitch using the contractor's trial numbers (calls delivered and revenue generated) to prove immediate ROI, walk through the target objection responses when prices or terms are questioned, and review the summarized 5-poi"
+        }
+      ]
+    },
+    {
+      "id": "financial-unit-economics-model",
+      "title": "Define Unit Economics & Target Deal Structure for $25k/mo",
+      "status": "todo",
+      "done": false,
+      "depends_on": [],
+      "acceptance": "",
+      "tools": [
+        {
+          "name": "Rank-and-Rent Unit Economics Calculator",
+          "type": null,
+          "usage": "Enter your target monthly recurring revenue, average lease price per rank-and-rent site, and estimated lead volume per site into the input fields. The calculator instantly determines the required number of signed clients, total monthly lead generation needed, and effective price per lead. Explore the sensitivity matrix to compare different pricing models and save your custom scenarios for strategy"
+        }
+      ]
+    },
+    {
+      "id": "gsc-indexing-ranking-check",
+      "title": "Verify Google Indexing and Initial Keyword Rankings",
+      "status": "todo",
+      "done": false,
+      "depends_on": [
+        "local-citations-citations-setup"
+      ],
+      "acceptance": "",
+      "tools": [
+        {
+          "name": "Google Indexing & SERP Rank Tracker",
+          "type": null,
+          "usage": "Open the Google Indexing & SERP Rank Tracker tool in any web browser. Use the '+ Add Target Keyword' button to enter target landing page URLs, target keywords, cities, Search Console indexing status (e.g., Indexed vs. Not Indexed), and current SERP rankings. The dashboard automatically calculates indexing rates, average position, and net weekly movements while plotting interactive 4-week rank tren"
+        }
+      ]
+    },
+    {
+      "id": "local-citations-citations-setup",
+      "title": "Build Initial Core Local Citations",
+      "status": "todo",
+      "done": false,
+      "depends_on": [
+        "on-page-seo-schema-setup"
+      ],
+      "acceptance": "",
+      "tools": [
+        {
+          "name": "Core Local Citation Verification Checklist",
+          "type": null,
+          "usage": "Use this checklist to systematically set up and verify consistent Name, Address, and Phone (NAP) details across top tier-1 local business directories. Check off each directory as you audit, claim, or submit your business listing to ensure uniform local citation authority and maximum local search visibility."
+        }
+      ]
+    },
+    {
+      "id": "niche-keyword-research",
+      "title": "Perform Local Keyword & Competition Research for Selected Niches",
+      "status": "todo",
+      "done": false,
+      "depends_on": [
+        "url-portfolio-triage"
+      ],
+      "acceptance": "",
+      "tools": []
+    },
+    {
+      "id": "on-page-seo-schema-setup",
+      "title": "Implement On-Page SEO and Local Schema Markup",
+      "status": "todo",
+      "done": false,
+      "depends_on": [
+        "site-template-deployment"
+      ],
+      "acceptance": "",
+      "tools": [
+        {
+          "name": "LocalBusiness Schema & Meta Tag Generator",
+          "type": null,
+          "usage": "Fill in your business details including Business Name, Service Category, Address/City, and Phone Number in the left panel. The tool instantly generates valid JSON-LD LocalBusiness schema code, optimized page title tags, target H1 headers, and meta descriptions with live character counters and a visual Google SERP preview. Click 'Copy' or 'Copy Script' to grab code snippets for your site, or use 'S"
+        }
+      ]
+    },
+    {
+      "id": "outreach-script-creation",
+      "title": "Draft Cold Outreach Scripts & Value Proposition",
+      "status": "todo",
+      "done": false,
+      "depends_on": [
+        "prospect-list-building"
+      ],
+      "acceptance": "",
+      "tools": [
+        {
+          "name": "3-Free-Leads Rank-and-Rent Pitch Scripts",
+          "type": null,
+          "usage": "Enter contractor details (Business Name, Owner Name, Niche, City) to dynamically generate battle-tested Cold Phone, Cold Email, and SMS Hook outreach scripts pitching 3 free trial lead calls. Click the copy buttons to copy the generated scripts."
+        }
+      ]
+    },
+    {
+      "id": "pre-sale-cold-outreach-campaign",
+      "title": "Launch First Wave Cold Outreach Campaign",
+      "status": "todo",
+      "done": false,
+      "depends_on": [
+        "outreach-script-creation",
+        "call-tracking-setup"
+      ],
+      "acceptance": "",
+      "tools": []
+    },
+    {
+      "id": "prospect-list-building",
+      "title": "Build Target Client Prospect List",
+      "status": "todo",
+      "done": false,
+      "depends_on": [
+        "niche-keyword-research"
+      ],
+      "acceptance": "",
+      "tools": [
+        {
+          "name": "Contractor Prospect Pipeline Tracker",
+          "type": null,
+          "usage": "Use this interactive pipeline tracker to manage target contractor prospects (roofing, plumbing, HVAC, electrical, solar, etc.). Click \"+ Add New Prospect\" to store business names, owner details, contact info, niche, city, trial offer details, and follow-up dates. Use the Kanban view to drag/move prospects through pipeline stages from Uncontacted to Closed Won, or switch to Table View for list mana"
+        }
+      ]
+    },
+    {
+      "id": "scaled-outreach-and-contract-closing",
+      "title": "Execute Scaled Sales Pipeline to Reach $25k/mo Target",
+      "status": "todo",
+      "done": false,
+      "depends_on": [
+        "site-replication-scaling-plan"
+      ],
+      "acceptance": "",
+      "tools": [
+        {
+          "name": "90-Day $25k MRR Revenue Dashboard",
+          "type": null,
+          "usage": "Use this interactive dashboard to monitor your progress toward $25,000/mo in recurring revenue over a 90-day sprint. Adjust your active leased sites count, monthly lease rates, and active free trial partners using the driver controls or by logging individual site accounts in the roster table. The dashboard automatically calculates your current MRR, target progress percentage, remaining monthly con"
+        }
+      ]
+    },
+    {
+      "id": "site-replication-scaling-plan",
+      "title": "Replicate Proven Template across Next 5 Target Cities/Niches",
+      "status": "todo",
+      "done": false,
+      "depends_on": [
+        "close-first-lease-agreement"
+      ],
+      "acceptance": "",
+      "tools": []
+    },
+    {
+      "id": "site-template-deployment",
+      "title": "Deploy Local Service Lead-Gen Site Template",
+      "status": "todo",
+      "done": false,
+      "depends_on": [
+        "niche-keyword-research",
+        "budget-allocation-plan"
+      ],
+      "acceptance": "",
+      "tools": []
+    },
+    {
+      "id": "url-portfolio-triage",
+      "title": "Audit and Select Best URLs from Existing Portfolio",
+      "status": "todo",
+      "done": false,
+      "depends_on": [
+        "financial-unit-economics-model"
+      ],
+      "acceptance": "",
+      "tools": [
+        {
+          "name": "34-URL Domain Portfolio Scoring Matrix",
+          "type": null,
+          "usage": "Read through this research brief to learn how to score, prioritize, and monetize your portfolio of 34 domains. Follow the 4-factor scoring rubric to assign a 1-10 Niche Commercial Value Score to each domain, select your Top 5 Pilot Sites for immediate lead-generation deployment, and assign the remaining domains to holding, parking, or liquidation tiers."
+        }
+      ]
+    }
+  ]
+}
